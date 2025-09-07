@@ -18,9 +18,9 @@ use crate::board::ROWS;
 #[command(name = "connect-4")]
 #[command(about = "A Connect 4 game with AI strategies")]
 struct Cli {
-    /// Run the game in interactive mode
+    /// Run AI simulation mode instead of interactive game
     #[arg(short, long)]
-    interactive: bool,
+    sim: bool,
 }
 
 fn game<R: Strategy, B: Strategy>(red: R, blue: B) -> Option<Board> {
@@ -129,8 +129,8 @@ fn play_interactive() -> Result<()> {
 
         // Update the board display
         term.clear_line()?;
-        term.clear_last_lines(ROWS + 1)?;
-        write!(term, "{}\n\n", board)?;
+        term.clear_last_lines(ROWS + 2)?;
+        write!(term, "\n{}\n\n", board)?;
 
         // Is the game over?
         if let Some(winner) = board.has_winner() {
@@ -156,8 +156,8 @@ fn play_interactive() -> Result<()> {
 
         // Update the board display
         term.clear_line()?;
-        term.clear_last_lines(ROWS + 1)?;
-        writeln!(term, "{}", board)?;
+        term.clear_last_lines(ROWS + 2)?;
+        writeln!(term, "\n{}", board)?;
 
         // Is the game over?
         if let Some(winner) = board.has_winner() {
@@ -179,11 +179,16 @@ fn play_interactive() -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if cli.interactive {
-        return play_interactive();
+    if cli.sim {
+        // Run AI vs AI simulation
+        return run_simulation();
     }
 
-    // Default behavior: run AI vs AI simulation
+    // Default behavior: interactive mode
+    play_interactive()
+}
+
+fn run_simulation() -> Result<()> {
     let red = Setup::new(
         TriesToWin::new(RandomStrategy::default(), Piece::Red),
         Piece::Red,
