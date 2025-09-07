@@ -2,9 +2,26 @@ mod board;
 mod strategy;
 
 use anyhow::{Context, Result};
-use board::{Board, Piece};
-use std::time::Instant;
+use board::{Board, COLUMNS, Piece};
+use clap::Parser;
+use console::Key;
+use std::io::Write;
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 use strategy::{RandomStrategy, Setup, Strategy, TriesToWin};
+
+use crate::board::ROWS;
+
+#[derive(Parser)]
+#[command(name = "connect-4")]
+#[command(about = "A Connect 4 game with AI strategies")]
+struct Cli {
+    /// Run the game in interactive mode
+    #[arg(short, long)]
+    interactive: bool,
+}
 
 fn game<R: Strategy, B: Strategy>(red: R, blue: B) -> Option<Board> {
     let mut board = Board::new();
@@ -49,7 +66,124 @@ fn simulate_games<R: Strategy, B: Strategy>(
     Ok((red_wins, blue_wins, ties))
 }
 
+fn play_interactive() -> Result<()> {
+    // Welcome:
+    //
+    // [ ] [ ] [ ] [ ] [ ] [ ] [ ]
+    // [ ] [ ] [ ] [ ] [ ] [ ] [ ]
+    // [ ] [ ] [ ] [ ] [ ] [ ] [ ]
+    // [ ] [ ] [B] [ ] [ ] [ ] [ ]
+    // [ ] [ ] [R] [ ] [ ] [ ] [ ]
+    // [R] [ ] [B] [ ] [ ] [ ] [ ]
+    //      ^
+    // Pick your move
+    //
+    let mut term = console::Term::stdout();
+    let mut board = Board::new();
+    let mut selection = COLUMNS / 2;
+    let ai = TriesToWin::new(RandomStrategy::default(), Piece::Blue);
+
+    // Get a move
+    // Get the AI response
+    // Redraw the board
+    // Is there a winner?
+    // Repeat
+
+    term.hide_cursor()?;
+    term.write_line("You are Red. You are playing against TriesToWin => RandomStrategy")?;
+    term.write_line("")?;
+
+    writeln!(term, "{}", board)?;
+
+    loop {
+        'selection: loop {
+            // Draw the selection
+            writeln!(term, " {}", "    ".repeat(selection) + "^")?;
+            write!(term, "Make your move")?;
+            'key: loop {
+                let key = term.read_key()?;
+                match key {
+                    Key::Unknown => anyhow::bail!("Problem"),
+                    Key::Char('q') => anyhow::bail!("Quit!"),
+                    Key::ArrowLeft | Key::Char('a') => {
+                        selection = selection.saturating_sub(1);
+                        break 'key;
+                    }
+                    Key::ArrowRight | Key::Char('d') => {
+                        if selection < COLUMNS - 1 {
+                            selection += 1;
+                        }
+                        break 'key;
+                    }
+                    Key::Enter => {
+                        break 'selection;
+                    }
+                    _ => {}
+                }
+            }
+            term.clear_last_lines(1)?;
+        }
+
+        // Make the move
+        board.place(selection, Piece::Red);
+
+        // Update the board display
+        term.clear_line()?;
+        term.clear_last_lines(ROWS + 1)?;
+        write!(term, "{}\n\n", board)?;
+
+        // Is the game over?
+        if let Some(winner) = board.has_winner() {
+            match winner {
+                Piece::Red => writeln!(term, "Red wins.")?,
+                Piece::Blue => writeln!(term, "Blue wins.")?,
+                Piece::Empty => unreachable!(),
+            }
+            return Ok(());
+        }
+
+        if board.valid_moves().is_empty() {
+            writeln!(term, "Tie.")?;
+            return Ok(());
+        }
+
+        write!(term, "AI is thinking...")?;
+
+        thread::sleep(Duration::from_millis(500));
+        // Make the AI move
+        let ai_move = ai.play(&board).context("Failed to get AI move");
+        board.place(ai_move?, Piece::Blue);
+
+        // Update the board display
+        term.clear_line()?;
+        term.clear_last_lines(ROWS + 1)?;
+        writeln!(term, "{}", board)?;
+
+        // Is the game over?
+        if let Some(winner) = board.has_winner() {
+            match winner {
+                Piece::Red => writeln!(term, "Red wins.")?,
+                Piece::Blue => writeln!(term, "Blue wins.")?,
+                Piece::Empty => unreachable!(),
+            }
+            return Ok(());
+        }
+
+        if board.valid_moves().is_empty() {
+            writeln!(term, "Tie.")?;
+            return Ok(());
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    if cli.interactive {
+        return play_interactive();
+    }
+
+    // Default behavior: run AI vs AI simulation
     let red = Setup::new(
         TriesToWin::new(RandomStrategy::default(), Piece::Red),
         Piece::Red,

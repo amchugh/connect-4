@@ -156,18 +156,21 @@ impl fmt::Display for Piece {
 
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for row in &self.state {
-            for col in row {
+        for y in 0..ROWS {
+            for col in &self.state[y] {
                 write!(f, "{} ", col)?;
             }
-            writeln!(f)?;
+            if y != ROWS - 1 {
+                writeln!(f)?;
+            }
         }
-        match self.has_winner() {
-            Some(Piece::Red) => write!(f, "Red wins!"),
-            Some(Piece::Blue) => write!(f, "Blue wins!"),
-            Some(Piece::Empty) => unreachable!("Empty piece cannot win"),
-            None => write!(f, "No winner yet"),
-        }
+        Ok(())
+        // match self.has_winner() {
+        //     Some(Piece::Red) => write!(f, "Red wins!"),
+        //     Some(Piece::Blue) => write!(f, "Blue wins!"),
+        //     Some(Piece::Empty) => unreachable!("Empty piece cannot win"),
+        //     None => write!(f, "No winner yet"),
+        // }
     }
 }
 

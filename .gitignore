@@ -1,1 +1,12 @@
-/target
+# Rust
+/target/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Release binaries
+/releases/
