@@ -13,7 +13,7 @@ A fast Connect 4 game written in Rust with AI strategies and an interactive term
 ## Installation
 
 ### Pre-built Binary (macOS M-series)
-Download the latest release from the [Releases page](../../releases).
+Download the latest release from the [Releases page](https://github.com/amchugh/connect-4/releases).
 
 ### From Source
 ```bash
@@ -24,18 +24,18 @@ cargo install --path .
 
 ## Usage
 
-### Interactive Mode (Human vs AI)
+### Interactive Mode (Default - Human vs AI)
 ```bash
-connect-4 --interactive
-# or
-connect-4 -i
+connect-4
 ```
 
 Use arrow keys to select a column, press Enter to drop your piece. You play as Red, AI plays as Blue.
 
-### AI Simulation Mode (Default)
+### AI Simulation Mode
 ```bash
-connect-4
+connect-4 --sim
+# or
+connect-4 -s
 ```
 
 Runs AI vs AI battles to test strategy effectiveness:
@@ -72,8 +72,11 @@ cargo run
 # Run optimized (100,000 games)
 cargo run --release
 
-# Interactive mode
-cargo run -- --interactive
+# Interactive mode (default)
+cargo run
+
+# Simulation mode
+cargo run -- --sim
 
 # Run tests
 cargo test

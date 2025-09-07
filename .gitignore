@@ -10,3 +10,4 @@
 
 # Release binaries
 /releases/
+release.sh
