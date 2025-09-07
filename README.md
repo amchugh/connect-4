@@ -90,7 +90,3 @@ cargo clippy
 - `src/board.rs`: Game board logic and win detection
 - `src/strategy.rs`: AI strategy implementations
 - `src/main.rs`: Game loop and CLI interface
-
-## License
-
-MIT License - see LICENSE file for details.
