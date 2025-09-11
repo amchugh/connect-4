@@ -18,6 +18,14 @@ impl Piece {
             Piece::Blue => Piece::Red,
         }
     }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Piece::Red => "Red",
+            Piece::Blue => "Blue",
+            Piece::Empty => panic!("Why are we trying to get the color of Empty?"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

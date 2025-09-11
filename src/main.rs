@@ -5,8 +5,10 @@ use anyhow::{Context, Result};
 use board::{Board, COLUMNS, Piece};
 use clap::Parser;
 use console::Key;
+use inquire::Select;
 use std::cell::RefCell;
 use std::io::Write;
+use std::rc::Rc;
 use std::{
     thread,
     time::{Duration, Instant},
@@ -25,7 +27,9 @@ struct Cli {
     sim: bool,
 }
 
-fn game<R: Strategy, B: Strategy>(red: R, blue: B) -> Option<Board> {
+type S = Rc<dyn Strategy>;
+
+fn game(red: &S, blue: &S) -> Option<Board> {
     let mut board = Board::new();
     loop {
         // Red plays, then blue.
@@ -45,17 +49,13 @@ fn game<R: Strategy, B: Strategy>(red: R, blue: B) -> Option<Board> {
     Some(board)
 }
 
-fn simulate_games<R: Strategy, B: Strategy>(
-    red: R,
-    blue: B,
-    games: usize,
-) -> Result<(usize, usize, usize)> {
+fn simulate_games(red: S, blue: S, games: usize) -> Result<(usize, usize, usize)> {
     let mut red_wins = 0;
     let mut blue_wins = 0;
     let mut ties = 0;
 
     for _ in 0..games {
-        let result = game(red.clone(), blue.clone()).context("Failed to play game")?;
+        let result = game(&red, &blue).context("Failed to play game")?;
 
         match result.has_winner() {
             Some(Piece::Red) => red_wins += 1,
@@ -83,18 +83,7 @@ fn play_interactive() -> Result<()> {
     let mut term = console::Term::stdout();
     let mut board = Board::new();
     let mut selection = COLUMNS / 2;
-    // let ai = TriesToWin::new(
-    //     Setup::new(RandomStrategy::default(), Piece::Blue),
-    //     Piece::Blue,
-    // );
-    let ai = TriesToWin::new(
-        ThreeInARow::new(
-            Setup::new(RandomStrategy::default(), Piece::Blue),
-            Piece::Blue,
-            RefCell::new(rand::rng()),
-        ),
-        Piece::Blue,
-    );
+    let ai = select_strategy(Piece::Blue)?;
 
     // Get a move
     // Get the AI response
@@ -187,11 +176,13 @@ fn play_interactive() -> Result<()> {
                 )?,
                 Piece::Empty => unreachable!(),
             }
+            term.show_cursor()?;
             return Ok(());
         }
 
         if board.valid_moves().is_empty() {
             writeln!(term, "Tie.")?;
+            term.show_cursor()?;
             return Ok(());
         }
     }
@@ -209,12 +200,37 @@ fn main() -> Result<()> {
     play_interactive()
 }
 
+fn select_strategy(piece: Piece) -> Result<S> {
+    let strategies: Vec<S> = vec![
+        Rc::new(TriesToWin::new(
+            ThreeInARow::new(
+                Setup::new(RandomStrategy::default(), piece),
+                piece,
+                RefCell::new(rand::rng()),
+            ),
+            piece,
+        )),
+        Rc::new(TriesToWin::new(
+            ThreeInARow::new(RandomStrategy::default(), piece, RefCell::new(rand::rng())),
+            piece,
+        )),
+        Rc::new(TriesToWin::new(
+            Setup::new(RandomStrategy::default(), piece),
+            piece,
+        )),
+        Rc::new(TriesToWin::new(RandomStrategy::default(), piece)),
+        Rc::new(RandomStrategy::default()),
+    ];
+    Ok(Select::new(
+        &format!("Select a strategy for {}", piece.name()),
+        strategies,
+    )
+    .prompt()?)
+}
+
 fn run_simulation() -> Result<()> {
-    let red = Setup::new(
-        TriesToWin::new(RandomStrategy::default(), Piece::Red),
-        Piece::Red,
-    );
-    let blue = RandomStrategy::default();
+    let red = select_strategy(Piece::Red)?;
+    let blue = select_strategy(Piece::Blue)?;
 
     const GAMES: usize = if cfg!(debug_assertions) { 100 } else { 100_000 };
 
@@ -228,9 +244,9 @@ fn run_simulation() -> Result<()> {
         duration.as_millis()
     );
 
-    println!("Red wins: {:.2}%", red_wins as f64 / GAMES as f64 * 100.0);
+    println!("Red wins:  {:.2}%", red_wins as f64 / GAMES as f64 * 100.0);
     println!("Blue wins: {:.2}%", blue_wins as f64 / GAMES as f64 * 100.0);
-    println!("Ties: {:.2}%", ties as f64 / GAMES as f64 * 100.0);
+    println!("Ties:      {:.2}%", ties as f64 / GAMES as f64 * 100.0);
 
     Ok(())
 }

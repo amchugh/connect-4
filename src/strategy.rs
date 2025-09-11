@@ -2,7 +2,7 @@ use crate::board::{Board, Piece};
 use rand::seq::SliceRandom;
 use std::cell::RefCell;
 
-pub trait Strategy: Clone + std::fmt::Display {
+pub trait Strategy: std::fmt::Display {
     fn play(&self, board: &Board) -> Option<usize>;
 }
 
