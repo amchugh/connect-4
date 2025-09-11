@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use board::{Board, COLUMNS, Piece};
 use clap::Parser;
 use console::Key;
+use std::cell::RefCell;
 use std::io::Write;
 use std::{
     thread,
@@ -13,6 +14,7 @@ use std::{
 use strategy::{RandomStrategy, Setup, Strategy, TriesToWin};
 
 use crate::board::ROWS;
+use crate::strategy::ThreeInARow;
 
 #[derive(Parser)]
 #[command(name = "connect-4")]
@@ -81,7 +83,18 @@ fn play_interactive() -> Result<()> {
     let mut term = console::Term::stdout();
     let mut board = Board::new();
     let mut selection = COLUMNS / 2;
-    let ai = TriesToWin::new(RandomStrategy::default(), Piece::Blue);
+    // let ai = TriesToWin::new(
+    //     Setup::new(RandomStrategy::default(), Piece::Blue),
+    //     Piece::Blue,
+    // );
+    let ai = TriesToWin::new(
+        ThreeInARow::new(
+            Setup::new(RandomStrategy::default(), Piece::Blue),
+            Piece::Blue,
+            RefCell::new(rand::rng()),
+        ),
+        Piece::Blue,
+    );
 
     // Get a move
     // Get the AI response
@@ -90,7 +103,7 @@ fn play_interactive() -> Result<()> {
     // Repeat
 
     term.hide_cursor()?;
-    term.write_line("You are Red. You are playing against TriesToWin => RandomStrategy")?;
+    writeln!(term, "You are Red. You are playing against {}", ai)?;
     term.write_line("")?;
 
     writeln!(term, "{}", board)?;
@@ -162,8 +175,16 @@ fn play_interactive() -> Result<()> {
         // Is the game over?
         if let Some(winner) = board.has_winner() {
             match winner {
-                Piece::Red => writeln!(term, "Red wins.")?,
-                Piece::Blue => writeln!(term, "Blue wins.")?,
+                Piece::Red => writeln!(
+                    term,
+                    "Red wins after {} moves.",
+                    board.get_num_pieces_played()
+                )?,
+                Piece::Blue => writeln!(
+                    term,
+                    "Blue wins after {} moves.",
+                    board.get_num_pieces_played()
+                )?,
                 Piece::Empty => unreachable!(),
             }
             return Ok(());
