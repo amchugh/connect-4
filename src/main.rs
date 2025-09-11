@@ -6,6 +6,7 @@ use board::{Board, COLUMNS, Piece};
 use clap::Parser;
 use console::Key;
 use inquire::Select;
+use scopeguard::defer;
 use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
@@ -92,6 +93,10 @@ fn play_interactive() -> Result<()> {
     // Repeat
 
     term.hide_cursor()?;
+    let dropterm = term.clone();
+    defer! {
+        let _ = dropterm.show_cursor();
+    };
     writeln!(term, "You are Red. You are playing against {}", ai)?;
     term.write_line("")?;
 
