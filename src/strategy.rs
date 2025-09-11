@@ -132,15 +132,13 @@ impl<S: Strategy> std::fmt::Display for Setup<S> {
 pub struct ThreeInARow<S: Strategy> {
     piece: Piece,
     fallback: Box<S>,
-    rng: RefCell<rand::rngs::ThreadRng>,
 }
 
 impl<S: Strategy> ThreeInARow<S> {
-    pub fn new(fallback: S, piece: Piece, rng: RefCell<rand::rngs::ThreadRng>) -> Self {
+    pub fn new(fallback: S, piece: Piece) -> Self {
         ThreeInARow {
             piece,
             fallback: Box::new(fallback),
-            rng,
         }
     }
 }
@@ -171,5 +169,52 @@ impl<S: Strategy> Strategy for ThreeInARow<S> {
 impl<S: Strategy> std::fmt::Display for ThreeInARow<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ThreeInARow => {}", self.fallback)
+    }
+}
+
+/// Strategy that avoids placing pieces in columns that would allow the opponent to win on their next turn.
+pub struct AvoidTraps {
+    piece: Piece,
+    fallback: Box<dyn Strategy>,
+}
+
+impl AvoidTraps {
+    pub fn new(fallback: Box<dyn Strategy>, piece: Piece) -> Self {
+        AvoidTraps { piece, fallback }
+    }
+}
+
+impl Strategy for AvoidTraps {
+    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
+        // Disqualify columns that would allow the opponent to win on their next turn
+        let mut allowed = Vec::with_capacity(options.len());
+
+        'candidate_loop: for col in options {
+            let mut test_board = *board;
+            test_board.place(*col, self.piece);
+            for next_col in test_board.valid_moves() {
+                let mut next_board = test_board;
+                next_board.place(next_col, self.piece.opponent());
+                if next_board.has_winner() == Some(self.piece.opponent()) {
+                    continue 'candidate_loop;
+                }
+            }
+            allowed.push(*col);
+        }
+
+        // If any move loses, we know we're going to lose :(
+        // So just pick the first move that we were given
+        if allowed.is_empty() {
+            options.first().cloned()
+        } else {
+            // Run the fallback strategy on the allowed moves
+            self.fallback.select_from(board, &allowed)
+        }
+    }
+}
+
+impl std::fmt::Display for AvoidTraps {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AvoidTraps => {}", self.fallback)
     }
 }

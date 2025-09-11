@@ -5,9 +5,9 @@ use anyhow::{Context, Result};
 use board::{Board, COLUMNS, Piece};
 use clap::Parser;
 use console::Key;
+use indicatif::{ProgressBar, ProgressStyle};
 use inquire::Select;
 use scopeguard::defer;
-use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 use std::{
@@ -17,15 +17,21 @@ use std::{
 use strategy::{RandomStrategy, Setup, Strategy, TriesToWin};
 
 use crate::board::ROWS;
-use crate::strategy::ThreeInARow;
+use crate::strategy::{AvoidTraps, ThreeInARow};
 
 #[derive(Parser)]
 #[command(name = "connect-4")]
 #[command(about = "A Connect 4 game with AI strategies")]
+#[command(version)]
 struct Cli {
     /// Run AI simulation mode instead of interactive game
     #[arg(short, long)]
     sim: bool,
+
+    /// How many iterations should be ran in a simulation
+    /// Default: 100,000
+    #[arg(short, long)]
+    iterations: Option<usize>,
 }
 
 type S = Rc<dyn Strategy>;
@@ -55,6 +61,15 @@ fn simulate_games(red: S, blue: S, games: usize) -> Result<(usize, usize, usize)
     let mut blue_wins = 0;
     let mut ties = 0;
 
+    let pb = ProgressBar::new(games as u64);
+    pb.set_style(
+        ProgressStyle::with_template(
+            "[{eta_precise} => {elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+        )
+        .unwrap(),
+    );
+    pb.set_message("Simulating games...");
+
     for _ in 0..games {
         let result = game(&red, &blue).context("Failed to play game")?;
 
@@ -64,7 +79,10 @@ fn simulate_games(red: S, blue: S, games: usize) -> Result<(usize, usize, usize)
             Some(_) => panic!("Unexpected winner"),
             None => ties += 1,
         }
+
+        pb.inc(1);
     }
+    pb.finish_and_clear();
 
     Ok((red_wins, blue_wins, ties))
 }
@@ -198,7 +216,9 @@ fn main() -> Result<()> {
 
     if cli.sim {
         // Run AI vs AI simulation
-        return run_simulation();
+        const GAMES: usize = if cfg!(debug_assertions) { 100 } else { 100_000 };
+        let games = cli.iterations.unwrap_or(GAMES);
+        return run_simulation(games);
     }
 
     // Default behavior: interactive mode
@@ -207,16 +227,19 @@ fn main() -> Result<()> {
 
 fn select_strategy(piece: Piece) -> Result<S> {
     let strategies: Vec<S> = vec![
-        Rc::new(TriesToWin::new(
-            ThreeInARow::new(
-                Setup::new(RandomStrategy::default(), piece),
+        Rc::new(AvoidTraps::new(
+            Box::new(TriesToWin::new(
+                ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
                 piece,
-                RefCell::new(rand::rng()),
-            ),
+            )),
             piece,
         )),
         Rc::new(TriesToWin::new(
-            ThreeInARow::new(RandomStrategy::default(), piece, RefCell::new(rand::rng())),
+            ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
+            piece,
+        )),
+        Rc::new(TriesToWin::new(
+            ThreeInARow::new(RandomStrategy::default(), piece),
             piece,
         )),
         Rc::new(TriesToWin::new(
@@ -233,25 +256,29 @@ fn select_strategy(piece: Piece) -> Result<S> {
     .prompt()?)
 }
 
-fn run_simulation() -> Result<()> {
+fn run_simulation(iterations: usize) -> Result<()> {
     let red = select_strategy(Piece::Red)?;
     let blue = select_strategy(Piece::Blue)?;
 
-    const GAMES: usize = if cfg!(debug_assertions) { 100 } else { 100_000 };
-
     let start = Instant::now();
-    let (red_wins, blue_wins, ties) = simulate_games(red, blue, GAMES)?;
+    let (red_wins, blue_wins, ties) = simulate_games(red, blue, iterations)?;
     let duration = start.elapsed();
 
     println!(
         "Result from {} games (took {}ms):",
-        GAMES,
+        iterations,
         duration.as_millis()
     );
 
-    println!("Red wins:  {:.2}%", red_wins as f64 / GAMES as f64 * 100.0);
-    println!("Blue wins: {:.2}%", blue_wins as f64 / GAMES as f64 * 100.0);
-    println!("Ties:      {:.2}%", ties as f64 / GAMES as f64 * 100.0);
+    println!(
+        "Red wins:  {:.2}%",
+        red_wins as f64 / iterations as f64 * 100.0
+    );
+    println!(
+        "Blue wins: {:.2}%",
+        blue_wins as f64 / iterations as f64 * 100.0
+    );
+    println!("Ties:      {:.2}%", ties as f64 / iterations as f64 * 100.0);
 
     Ok(())
 }
