@@ -3,7 +3,7 @@ use std::fmt;
 pub const ROWS: usize = 6;
 pub const COLUMNS: usize = 7;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Piece {
     Empty,
     Red,
@@ -32,6 +32,26 @@ impl Piece {
 pub struct Board {
     state: [[Piece; COLUMNS]; ROWS],
     pieces_played: usize,
+}
+
+impl std::cmp::PartialEq for Board {
+    fn eq(&self, other: &Self) -> bool {
+        for row in 0..ROWS {
+            for col in 0..COLUMNS {
+                if self.state[row][col] != other.state[row][col] {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+impl std::cmp::Eq for Board {}
+
+impl std::hash::Hash for Board {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.state.hash(state);
+    }
 }
 
 impl Board {
@@ -297,6 +317,26 @@ impl Default for Board {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_eq() {
+        let mut board1 = Board::new();
+        let mut board2 = Board::new();
+        assert_eq!(board1, board2);
+
+        board1.place(0, Piece::Red);
+        board2.place(0, Piece::Red);
+        assert_eq!(board1, board2);
+
+        board1.place(1, Piece::Blue);
+        board2.place(2, Piece::Red);
+        assert_ne!(board1, board2);
+
+        // Order doesn't matter
+        board1.place(2, Piece::Red);
+        board2.place(1, Piece::Blue);
+        assert_eq!(board1, board2);
+    }
 
     #[test]
     fn test_count_winning_opportunities_empty_board() {

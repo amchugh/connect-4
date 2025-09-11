@@ -1,5 +1,6 @@
 mod board;
 mod strategy;
+mod strategy_cache;
 
 use anyhow::{Context, Result};
 use board::{Board, COLUMNS, Piece};
@@ -18,6 +19,7 @@ use strategy::{RandomStrategy, Setup, Strategy, TriesToWin};
 
 use crate::board::ROWS;
 use crate::strategy::{AvoidInescapableTraps, AvoidTraps, ThreeInARow};
+use crate::strategy_cache::StrategyCache;
 
 #[derive(Parser)]
 #[command(name = "connect-4")]
@@ -278,6 +280,10 @@ fn select_strategy(piece: Piece) -> Result<S> {
 fn run_simulation(iterations: usize) -> Result<()> {
     let red = select_strategy(Piece::Red)?;
     let blue = select_strategy(Piece::Blue)?;
+
+    // Let's use caching for red and blue strategies so they run faster!
+    // let red = Rc::new(StrategyCache::new(red));
+    // let blue = Rc::new(StrategyCache::new(blue));
 
     let start = Instant::now();
     let (red_wins, blue_wins, ties) = simulate_games(red, blue, iterations)?;
