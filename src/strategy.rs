@@ -1,9 +1,13 @@
 use crate::board::{Board, Piece};
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use std::cell::RefCell;
 
 pub trait Strategy: std::fmt::Display {
-    fn play(&self, board: &Board) -> Option<usize>;
+    fn play(&self, board: &Board) -> Option<usize> {
+        let moves = board.valid_moves();
+        self.select_from(board, &moves)
+    }
+    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize>;
 }
 
 #[derive(Clone)]
@@ -26,10 +30,8 @@ impl std::fmt::Display for RandomStrategy {
 }
 
 impl Strategy for RandomStrategy {
-    fn play(&self, board: &Board) -> Option<usize> {
-        let mut moves = board.valid_moves();
-        moves.shuffle(&mut self.rng.borrow_mut());
-        moves.pop()
+    fn select_from(&self, _: &Board, options: &[usize]) -> Option<usize> {
+        options.choose(&mut self.rng.borrow_mut()).cloned()
     }
 }
 
@@ -49,28 +51,28 @@ impl<S: Strategy> TriesToWin<S> {
 }
 
 impl<S: Strategy> Strategy for TriesToWin<S> {
-    fn play(&self, board: &Board) -> Option<usize> {
+    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
         // If we could win, win.
-        for col in board.valid_moves() {
+        for col in options {
             let mut test_board = *board;
-            test_board.place(col, self.piece);
+            test_board.place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
-                return Some(col);
+                return Some(*col);
             }
         }
 
         // If we are going to lose, don't lose to it.
         let opponent = self.piece.opponent();
-        for col in board.valid_moves() {
+        for col in options {
             let mut test_board = *board;
-            test_board.place(col, opponent);
+            test_board.place(*col, opponent);
             if test_board.has_winner() == Some(opponent) {
-                return Some(col);
+                return Some(*col);
             }
         }
 
         // Otherwise, do the fallback strategy
-        self.fallback.play(board)
+        self.fallback.select_from(board, options)
     }
 }
 
@@ -96,27 +98,27 @@ impl<S: Strategy> Setup<S> {
 }
 
 impl<S: Strategy> Strategy for Setup<S> {
-    fn play(&self, board: &Board) -> Option<usize> {
+    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
         // We're going to pretend like we can place twice in a row.
         // If we can do that and win, let's do it.
-        for col in board.valid_moves() {
+        for col in options {
             let mut test_board = *board;
-            test_board.place(col, self.piece);
+            test_board.place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
-                return Some(col);
+                return Some(*col);
             }
             // Now, let's look at another move and see if it would win
             for second_move in test_board.valid_moves() {
                 let mut second_move_board = test_board;
                 second_move_board.place(second_move, self.piece);
                 if second_move_board.has_winner() == Some(self.piece) {
-                    return Some(col);
+                    return Some(*col);
                 }
             }
         }
 
         // Otherwise, do the fallback strategy
-        self.fallback.play(board)
+        self.fallback.select_from(board, options)
     }
 }
 
@@ -144,32 +146,25 @@ impl<S: Strategy> ThreeInARow<S> {
 }
 
 impl<S: Strategy> Strategy for ThreeInARow<S> {
-    fn play(&self, board: &Board) -> Option<usize> {
+    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
         let mut best = 0;
         let mut best_moves = vec![];
 
-        for col in board.valid_moves() {
+        for col in options {
             let mut test_board = *board;
-            test_board.place(col, self.piece);
+            test_board.place(*col, self.piece);
             let score = test_board.count_winning_opportunities(self.piece);
             if score > best {
                 best = score;
                 best_moves.clear();
-                best_moves.push(col);
+                best_moves.push(*col);
             } else if score == best {
-                best_moves.push(col);
+                best_moves.push(*col);
             }
         }
 
-        // See if we found any with three-in-a-row
-        if best == 0 {
-            // Otherwise, do the fallback strategy
-            self.fallback.play(board)
-        } else {
-            // Return a random move from the best moves
-            best_moves.shuffle(&mut self.rng.borrow_mut());
-            best_moves.pop()
-        }
+        // Run the fallback strategy on the best moves
+        self.fallback.select_from(board, &best_moves)
     }
 }
 
