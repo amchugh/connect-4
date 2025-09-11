@@ -17,7 +17,7 @@ use std::{
 use strategy::{RandomStrategy, Setup, Strategy, TriesToWin};
 
 use crate::board::ROWS;
-use crate::strategy::{AvoidTraps, ThreeInARow};
+use crate::strategy::{AvoidInescapableTraps, AvoidTraps, ThreeInARow};
 
 #[derive(Parser)]
 #[command(name = "connect-4")]
@@ -60,6 +60,8 @@ fn simulate_games(red: S, blue: S, games: usize) -> Result<(usize, usize, usize)
     let mut red_wins = 0;
     let mut blue_wins = 0;
     let mut ties = 0;
+
+    println!("Running with strategies:\nRed:  {red}\nBlue: {blue}",);
 
     let pb = ProgressBar::new(games as u64);
     pb.set_style(
@@ -227,6 +229,23 @@ fn main() -> Result<()> {
 
 fn select_strategy(piece: Piece) -> Result<S> {
     let strategies: Vec<S> = vec![
+        Rc::new(AvoidInescapableTraps::new(
+            Box::new(AvoidTraps::new(
+                Box::new(TriesToWin::new(
+                    ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
+                    piece,
+                )),
+                piece,
+            )),
+            piece,
+        )),
+        Rc::new(AvoidInescapableTraps::new(
+            Box::new(TriesToWin::new(
+                ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
+                piece,
+            )),
+            piece,
+        )),
         Rc::new(AvoidTraps::new(
             Box::new(TriesToWin::new(
                 ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),

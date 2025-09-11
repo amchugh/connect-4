@@ -192,12 +192,13 @@ impl Strategy for AvoidTraps {
         'candidate_loop: for col in options {
             let mut test_board = *board;
             test_board.place(*col, self.piece);
-            for next_col in test_board.valid_moves() {
-                let mut next_board = test_board;
-                next_board.place(next_col, self.piece.opponent());
-                if next_board.has_winner() == Some(self.piece.opponent()) {
-                    continue 'candidate_loop;
-                }
+            // If this move wins, short-circuit
+            if test_board.has_winner() == Some(self.piece) {
+                return Some(*col);
+            }
+            // No good if the opponent has a winning opportunity
+            if !test_board.winning_moves(self.piece.opponent()).is_empty() {
+                continue 'candidate_loop;
             }
             allowed.push(*col);
         }
@@ -216,5 +217,60 @@ impl Strategy for AvoidTraps {
 impl std::fmt::Display for AvoidTraps {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "AvoidTraps => {}", self.fallback)
+    }
+}
+
+/// Strategy that avoids placing anywhere the other player gets more than one three-in-a-row.
+pub struct AvoidInescapableTraps {
+    piece: Piece,
+    fallback: Box<dyn Strategy>,
+}
+
+impl AvoidInescapableTraps {
+    pub fn new(fallback: Box<dyn Strategy>, piece: Piece) -> Self {
+        AvoidInescapableTraps { piece, fallback }
+    }
+}
+
+impl Strategy for AvoidInescapableTraps {
+    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
+        // Disqualify columns that would allow the opponent to win on their next turn
+        let mut allowed = Vec::with_capacity(options.len());
+
+        'candidate_loop: for col in options {
+            let mut test_board = *board;
+            test_board.place(*col, self.piece);
+            // If this move wins, short-circuit
+            if test_board.has_winner() == Some(self.piece) {
+                return Some(*col);
+            }
+            for next_col in test_board.valid_moves() {
+                let mut next_board = test_board;
+                next_board.place(next_col, self.piece.opponent());
+                // If we've lost or have a losing position, don't take it.
+                if test_board.has_winner() == Some(self.piece.opponent()) {
+                    continue 'candidate_loop;
+                }
+                if test_board.winning_moves(self.piece.opponent()).len() > 1 {
+                    continue 'candidate_loop;
+                }
+            }
+            allowed.push(*col);
+        }
+
+        // If any move loses, we know we're going to lose :(
+        // So just pick the first move that we were given
+        if allowed.is_empty() {
+            options.first().cloned()
+        } else {
+            // Run the fallback strategy on the allowed moves
+            self.fallback.select_from(board, &allowed)
+        }
+    }
+}
+
+impl std::fmt::Display for AvoidInescapableTraps {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AvoidInescapableTraps => {}", self.fallback)
     }
 }

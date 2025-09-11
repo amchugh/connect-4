@@ -76,6 +76,21 @@ impl Board {
             .or_else(|| self.check_diagonals())
     }
 
+    /// Returns a vector of valid moves that would result in a win for the given piece.
+    pub fn winning_moves(&self, piece: Piece) -> Vec<usize> {
+        // Doesn't make sense to ask for winning moves if someone already won
+        assert!(self.has_winner().is_none());
+        let mut winning_moves = Vec::new();
+        for m in self.valid_moves() {
+            let mut next_board = *self;
+            next_board.place(m, piece);
+            if next_board.has_winner() == Some(piece) {
+                winning_moves.push(m)
+            }
+        }
+        winning_moves
+    }
+
     /// Counts the number of potential four-in-a-row opportunities for the given piece.
     /// This includes patterns like "XXX_", "_XXX", "XX_X", "X_XX" where X is the piece
     /// and _ is an empty space that could be filled to create four-in-a-row.
