@@ -277,7 +277,7 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
 
         match strategies.into_iter().nth(choice).unwrap() {
             Option::Done => break,
-            Option::Layer(strat) => stack.push(Strategy::layer(strat)),
+            Option::Layer(strat) => stack.push(Strategy::Layer(strat)),
             Option::Decider(strat) => stack.push(Strategy::Decision(strat)),
         }
     }
@@ -292,40 +292,66 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
 fn run_simulation(iterations: usize, use_cache: bool) -> Result<()> {
     let term = console::Term::stdout();
 
-    let red: Box<dyn Connect4AI>;
-    let blue: Box<dyn Connect4AI>;
-
     if use_cache {
         // Let's use caching for red and blue strategies so they run faster!
-        red = Box::new(StrategyCache::new(build_strategy_stack(Piece::Red, &term)?));
-        blue = Box::new(StrategyCache::new(build_strategy_stack(
+        let red = Box::new(StrategyCache::new(build_strategy_stack(Piece::Red, &term)?));
+        let blue = Box::new(StrategyCache::new(build_strategy_stack(
             Piece::Blue,
             &term,
         )?));
+
+        let start = Instant::now();
+        let (red_wins, blue_wins, ties) = simulate_games(red.as_ref(), blue.as_ref(), iterations)?;
+        let duration = start.elapsed();
+
+        println!(
+            "Result from {} games (took {}ms):",
+            iterations,
+            duration.as_millis()
+        );
+
+        println!(
+            "Red wins:  {:.2}%",
+            red_wins as f64 / iterations as f64 * 100.0
+        );
+        println!(
+            "Blue wins: {:.2}%",
+            blue_wins as f64 / iterations as f64 * 100.0
+        );
+        println!("Ties:      {:.2}%", ties as f64 / iterations as f64 * 100.0);
+
+        let red_cache_stats = red.cache_stats();
+        let blue_cache_stats = blue.cache_stats();
+
+        println!("Red cache:{}", &red_cache_stats);
+        println!("Blue cache:{}", &blue_cache_stats);
+
+        let cache_stats = red_cache_stats + blue_cache_stats;
+        println!("Overall cache stats:{}", &cache_stats);
     } else {
-        red = Box::new(build_strategy_stack(Piece::Red, &term)?);
-        blue = Box::new(build_strategy_stack(Piece::Blue, &term)?);
+        let red = Box::new(build_strategy_stack(Piece::Red, &term)?);
+        let blue = Box::new(build_strategy_stack(Piece::Blue, &term)?);
+
+        let start = Instant::now();
+        let (red_wins, blue_wins, ties) = simulate_games(red.as_ref(), blue.as_ref(), iterations)?;
+        let duration = start.elapsed();
+
+        println!(
+            "Result from {} games (took {}ms):",
+            iterations,
+            duration.as_millis()
+        );
+
+        println!(
+            "Red wins:  {:.2}%",
+            red_wins as f64 / iterations as f64 * 100.0
+        );
+        println!(
+            "Blue wins: {:.2}%",
+            blue_wins as f64 / iterations as f64 * 100.0
+        );
+        println!("Ties:      {:.2}%", ties as f64 / iterations as f64 * 100.0);
     }
-
-    let start = Instant::now();
-    let (red_wins, blue_wins, ties) = simulate_games(red.as_ref(), blue.as_ref(), iterations)?;
-    let duration = start.elapsed();
-
-    println!(
-        "Result from {} games (took {}ms):",
-        iterations,
-        duration.as_millis()
-    );
-
-    println!(
-        "Red wins:  {:.2}%",
-        red_wins as f64 / iterations as f64 * 100.0
-    );
-    println!(
-        "Blue wins: {:.2}%",
-        blue_wins as f64 / iterations as f64 * 100.0
-    );
-    println!("Ties:      {:.2}%", ties as f64 / iterations as f64 * 100.0);
 
     Ok(())
 }

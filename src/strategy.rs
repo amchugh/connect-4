@@ -70,14 +70,6 @@ pub enum Strategy {
 }
 
 impl Strategy {
-    pub fn layer(layer: Box<dyn StrategyLayer>) -> Self {
-        Strategy::Layer(layer)
-    }
-
-    pub fn decision(decider: Box<dyn StrategyDecider>) -> Self {
-        Strategy::Decision(decider)
-    }
-
     pub fn name(&self) -> &'static str {
         match self {
             Strategy::Layer(layer) => layer.name(),
