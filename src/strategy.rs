@@ -7,12 +7,12 @@ pub trait Connect4AI: std::fmt::Display {
 }
 
 pub struct StrategyStack {
-    strategies: Vec<Box<dyn StrategyLayer>>,
+    strategies: Vec<Strategy>,
     rng: RefCell<rand::rngs::ThreadRng>,
 }
 
 impl StrategyStack {
-    pub fn new(strategies: Vec<Box<dyn StrategyLayer>>) -> Self {
+    pub fn new(strategies: Vec<Strategy>) -> Self {
         StrategyStack {
             strategies,
             rng: RefCell::new(rand::rngs::ThreadRng::default()),
@@ -24,12 +24,20 @@ impl StrategyStack {
         assert!(!options.is_empty());
 
         for strategy in &self.strategies {
-            options = strategy.prune_from(board, &options);
-            assert!(
-                !options.is_empty(),
-                "Strategy {} gave no options",
-                strategy.name()
-            );
+            match strategy {
+                Strategy::Layer(strategy_layer) => {
+                    let new_options = strategy_layer.prune_from(board, &options);
+                    if !new_options.is_empty() {
+                        options = new_options
+                    }
+                }
+                Strategy::Decision(strategy_decider) => {
+                    if let Some(choice) = strategy_decider.choose(board, &options) {
+                        // Short circuit!
+                        return vec![choice];
+                    }
+                }
+            }
         }
 
         options
@@ -54,6 +62,33 @@ impl std::fmt::Display for StrategyStack {
         }
         write!(f, ")")
     }
+}
+
+pub enum Strategy {
+    Layer(Box<dyn StrategyLayer>),
+    Decision(Box<dyn StrategyDecider>),
+}
+
+impl Strategy {
+    pub fn layer(layer: Box<dyn StrategyLayer>) -> Self {
+        Strategy::Layer(layer)
+    }
+
+    pub fn decision(decider: Box<dyn StrategyDecider>) -> Self {
+        Strategy::Decision(decider)
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Strategy::Layer(layer) => layer.name(),
+            Strategy::Decision(decider) => decider.name(),
+        }
+    }
+}
+
+pub trait StrategyDecider {
+    fn choose(&self, board: &Board, options: &[usize]) -> Option<usize>;
+    fn name(&self) -> &'static str;
 }
 
 pub trait StrategyLayer {
@@ -91,33 +126,23 @@ impl TriesToWin {
     }
 }
 
-impl StrategyLayer for TriesToWin {
-    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
-        let winning_moves: Vec<usize> = options
-            .iter()
-            .copied()
-            .filter(|col| {
-                // If we could win, add it.
-                let mut test_board = *board;
-                test_board.place(*col, self.piece);
-                if test_board.has_winner() == Some(self.piece) {
-                    return true;
-                }
-                // If we would lose, add it to block
-                let mut test_board = *board;
-                test_board.place(*col, self.piece.opponent());
-                if test_board.has_winner() == Some(self.piece.opponent()) {
-                    return true;
-                }
-                false
-            })
-            .collect();
-
-        if winning_moves.is_empty() {
-            Vec::from(options)
-        } else {
-            winning_moves
+impl StrategyDecider for TriesToWin {
+    fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
+        for col in options {
+            // If we could win, add it.
+            let mut test_board = *board;
+            test_board.place(*col, self.piece);
+            if test_board.has_winner() == Some(self.piece) {
+                return Some(*col);
+            }
+            // If we would lose, add it to block
+            let mut test_board = *board;
+            test_board.place(*col, self.piece.opponent());
+            if test_board.has_winner() == Some(self.piece.opponent()) {
+                return Some(*col);
+            }
         }
+        None
     }
 
     fn name(&self) -> &'static str {
@@ -135,29 +160,19 @@ impl Setup {
     }
 }
 
-impl StrategyLayer for Setup {
-    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
-        let setups: Vec<usize> = options
-            .iter()
-            .copied()
-            .filter(|col| {
-                let mut test_board = *board;
-                test_board.place(*col, self.piece);
-                if test_board.has_winner() == Some(self.piece) {
-                    return true;
-                }
-                if !test_board.winning_moves(self.piece).is_empty() {
-                    return true;
-                }
-                false
-            })
-            .collect();
-
-        if setups.is_empty() {
-            Vec::from(options)
-        } else {
-            setups
+impl StrategyDecider for Setup {
+    fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
+        for col in options {
+            let mut test_board = *board;
+            test_board.place(*col, self.piece);
+            if test_board.has_winner() == Some(self.piece) {
+                return Some(*col);
+            }
+            if !test_board.winning_moves(self.piece).is_empty() {
+                return Some(*col);
+            }
         }
+        None
     }
 
     fn name(&self) -> &'static str {
@@ -196,6 +211,7 @@ impl StrategyLayer for ThreeInARow {
             }
         }
 
+        assert!(!best_moves.is_empty());
         best_moves
     }
 
@@ -235,13 +251,7 @@ impl StrategyLayer for AvoidTraps {
             allowed.push(*col);
         }
 
-        // If any move loses, we know we're going to lose :(
-        // So just pick the first move that we were given
-        if allowed.is_empty() {
-            Vec::from(options)
-        } else {
-            allowed
-        }
+        allowed
     }
 
     fn name(&self) -> &'static str {
@@ -287,13 +297,7 @@ impl StrategyLayer for AvoidInescapableTraps {
             allowed.push(*col);
         }
 
-        // If any move loses, we know we're going to lose :(
-        // So just pick the first move that we were given
-        if allowed.is_empty() {
-            Vec::from(options)
-        } else {
-            allowed
-        }
+        allowed
     }
 
     fn name(&self) -> &'static str {

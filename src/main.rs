@@ -17,7 +17,10 @@ use std::{
 use strategy::{RandomStrategy, Setup, StrategyLayer, TriesToWin};
 
 use crate::board::ROWS;
-use crate::strategy::{AvoidInescapableTraps, AvoidTraps, Connect4AI, StrategyStack, ThreeInARow};
+use crate::strategy::{
+    AvoidInescapableTraps, AvoidTraps, Connect4AI, Strategy, StrategyDecider, StrategyStack,
+    ThreeInARow,
+};
 use crate::strategy_cache::StrategyCache;
 
 #[derive(Parser)]
@@ -241,14 +244,16 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
 
     enum Option {
         Done,
-        Strategy(Box<dyn StrategyLayer>),
+        Layer(Box<dyn StrategyLayer>),
+        Decider(Box<dyn StrategyDecider>),
     }
 
     impl std::fmt::Display for Option {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 Option::Done => write!(f, "Done"),
-                Option::Strategy(x) => write!(f, "{}", x.name()),
+                Option::Layer(x) => write!(f, "Decider: {}", x.name()),
+                Option::Decider(x) => write!(f, "Filter Layer: {}", x.name()),
             }
         }
     }
@@ -256,12 +261,11 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
     loop {
         let strategies: Vec<Option> = vec![
             Option::Done,
-            Option::Strategy(Box::new(RandomStrategy::default())),
-            Option::Strategy(Box::new(TriesToWin::new(piece))),
-            Option::Strategy(Box::new(Setup::new(piece))),
-            Option::Strategy(Box::new(ThreeInARow::new(piece))),
-            Option::Strategy(Box::new(AvoidTraps::new(piece))),
-            Option::Strategy(Box::new(AvoidInescapableTraps::new(piece))),
+            Option::Layer(Box::new(AvoidInescapableTraps::new(piece))),
+            Option::Layer(Box::new(AvoidTraps::new(piece))),
+            Option::Layer(Box::new(ThreeInARow::new(piece))),
+            Option::Decider(Box::new(Setup::new(piece))),
+            Option::Decider(Box::new(TriesToWin::new(piece))),
         ];
 
         let choice = Select::new()
@@ -273,7 +277,8 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
 
         match strategies.into_iter().nth(choice).unwrap() {
             Option::Done => break,
-            Option::Strategy(strat) => stack.push(strat),
+            Option::Layer(strat) => stack.push(Strategy::layer(strat)),
+            Option::Decider(strat) => stack.push(Strategy::Decision(strat)),
         }
     }
 
