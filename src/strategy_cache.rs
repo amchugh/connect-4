@@ -1,42 +1,54 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
-use crate::{board::Board, strategy::Strategy};
+use rand::seq::IndexedRandom;
+
+use crate::{
+    board::Board,
+    strategy::{Connect4AI, StrategyStack},
+};
+
+type BoardCache = HashMap<Board, Vec<usize>>;
 
 pub struct StrategyCache {
-    strategy: Rc<dyn Strategy>,
-    cache: RefCell<HashMap<Board, Option<usize>>>,
+    stack: StrategyStack,
+    cache: RefCell<Arc<RwLock<BoardCache>>>,
+    rng: RefCell<rand::rngs::ThreadRng>,
 }
 
 impl StrategyCache {
-    pub fn new(strategy: Rc<dyn Strategy>) -> Self {
+    pub fn new(stack: StrategyStack) -> Self {
         Self {
-            strategy,
-            cache: RefCell::new(HashMap::new()),
+            stack,
+            cache: RefCell::new(Arc::new(RwLock::new(HashMap::new()))),
+            rng: RefCell::new(rand::rng()),
         }
     }
 }
 
 impl std::fmt::Display for StrategyCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "StrategyCache({})", self.strategy)
+        write!(f, "CACHED({}))", self.stack)
     }
 }
 
-impl Strategy for StrategyCache {
+impl Connect4AI for StrategyCache {
     fn play(&self, board: &Board) -> Option<usize> {
         // See if we have this cached
-        if let Some(result) = self.cache.borrow().get(board) {
-            *result
+        if let Some(result) = self.cache.borrow().read().unwrap().get(board) {
+            result.choose(&mut self.rng.borrow_mut()).copied()
         } else {
-            let result = self.strategy.play(board);
-            self.cache.borrow_mut().insert(*board, result);
-            result
+            let result = self.stack.evaluate_options(board);
+            let choice = result.choose(&mut self.rng.borrow_mut()).copied();
+            self.cache
+                .borrow_mut()
+                .write()
+                .unwrap()
+                .insert(*board, result);
+            choice
         }
-    }
-
-    fn select_from(&self, _: &crate::board::Board, _: &[usize]) -> Option<usize> {
-        todo!(
-            "Unsure how to optimially cache when options are limited. Maybe Strategy needs to split into two traits."
-        )
     }
 }

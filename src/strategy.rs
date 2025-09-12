@@ -2,26 +2,67 @@ use crate::board::{Board, Piece};
 use rand::seq::IndexedRandom;
 use std::cell::RefCell;
 
-pub trait Strategy: std::fmt::Display {
-    fn play(&self, board: &Board) -> Option<usize> {
-        let moves = board.valid_moves();
-        self.select_from(board, &moves)
-    }
-    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize>;
+pub trait Connect4AI: std::fmt::Display {
+    fn play(&self, board: &Board) -> Option<usize>;
 }
 
-#[derive(Clone)]
-pub struct RandomStrategy {
+pub struct StrategyStack {
+    strategies: Vec<Box<dyn StrategyLayer>>,
     rng: RefCell<rand::rngs::ThreadRng>,
 }
 
-impl Default for RandomStrategy {
-    fn default() -> Self {
-        RandomStrategy {
-            rng: RefCell::new(rand::rng()),
+impl StrategyStack {
+    pub fn new(strategies: Vec<Box<dyn StrategyLayer>>) -> Self {
+        StrategyStack {
+            strategies,
+            rng: RefCell::new(rand::rngs::ThreadRng::default()),
         }
     }
+
+    pub fn evaluate_options(&self, board: &Board) -> Vec<usize> {
+        let mut options = board.valid_moves();
+        assert!(!options.is_empty());
+
+        for strategy in &self.strategies {
+            options = strategy.prune_from(board, &options);
+            assert!(
+                !options.is_empty(),
+                "Strategy {} gave no options",
+                strategy.name()
+            );
+        }
+
+        options
+    }
 }
+
+impl Connect4AI for StrategyStack {
+    fn play(&self, board: &Board) -> Option<usize> {
+        let moves = self.evaluate_options(board);
+        moves.choose(&mut self.rng.borrow_mut()).copied()
+    }
+}
+
+impl std::fmt::Display for StrategyStack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StrategyStack(")?;
+        for (i, strategy) in self.strategies.iter().enumerate() {
+            if i > 0 {
+                write!(f, " => ")?;
+            }
+            write!(f, "{}", strategy.name())?;
+        }
+        write!(f, ")")
+    }
+}
+
+pub trait StrategyLayer {
+    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize>;
+    fn name(&self) -> &'static str;
+}
+
+#[derive(Clone, Default)]
+pub struct RandomStrategy {}
 
 impl std::fmt::Display for RandomStrategy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -29,128 +70,122 @@ impl std::fmt::Display for RandomStrategy {
     }
 }
 
-impl Strategy for RandomStrategy {
-    fn select_from(&self, _: &Board, options: &[usize]) -> Option<usize> {
-        options.choose(&mut self.rng.borrow_mut()).cloned()
+impl StrategyLayer for RandomStrategy {
+    fn prune_from(&self, _: &Board, options: &[usize]) -> Vec<usize> {
+        // Does nothing!
+        Vec::from(options)
+    }
+
+    fn name(&self) -> &'static str {
+        "RandomStrategy"
     }
 }
 
-#[derive(Clone)]
-pub struct TriesToWin<S: Strategy> {
-    fallback: Box<S>,
+pub struct TriesToWin {
     piece: Piece,
 }
 
-impl<S: Strategy> TriesToWin<S> {
-    pub fn new(fallback: S, piece: Piece) -> Self {
-        TriesToWin {
-            fallback: Box::new(fallback),
-            piece,
-        }
+impl TriesToWin {
+    pub fn new(piece: Piece) -> Self {
+        TriesToWin { piece }
     }
 }
 
-impl<S: Strategy> Strategy for TriesToWin<S> {
-    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
-        // If we could win, win.
-        for col in options {
-            let mut test_board = *board;
-            test_board.place(*col, self.piece);
-            if test_board.has_winner() == Some(self.piece) {
-                return Some(*col);
-            }
-        }
-
-        // If we are going to lose, don't lose to it.
-        let opponent = self.piece.opponent();
-        for col in options {
-            let mut test_board = *board;
-            test_board.place(*col, opponent);
-            if test_board.has_winner() == Some(opponent) {
-                return Some(*col);
-            }
-        }
-
-        // Otherwise, do the fallback strategy
-        self.fallback.select_from(board, options)
-    }
-}
-
-impl<S: Strategy> std::fmt::Display for TriesToWin<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TriesToWin => {}", self.fallback)
-    }
-}
-
-#[derive(Clone)]
-pub struct Setup<S: Strategy> {
-    fallback: Box<S>,
-    piece: Piece,
-}
-
-impl<S: Strategy> Setup<S> {
-    pub fn new(fallback: S, piece: Piece) -> Self {
-        Setup {
-            fallback: Box::new(fallback),
-            piece,
-        }
-    }
-}
-
-impl<S: Strategy> Strategy for Setup<S> {
-    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
-        // We're going to pretend like we can place twice in a row.
-        // If we can do that and win, let's do it.
-        for col in options {
-            let mut test_board = *board;
-            test_board.place(*col, self.piece);
-            if test_board.has_winner() == Some(self.piece) {
-                return Some(*col);
-            }
-            // Now, let's look at another move and see if it would win
-            for second_move in test_board.valid_moves() {
-                let mut second_move_board = test_board;
-                second_move_board.place(second_move, self.piece);
-                if second_move_board.has_winner() == Some(self.piece) {
-                    return Some(*col);
+impl StrategyLayer for TriesToWin {
+    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
+        let winning_moves: Vec<usize> = options
+            .iter()
+            .copied()
+            .filter(|col| {
+                // If we could win, add it.
+                let mut test_board = *board;
+                test_board.place(*col, self.piece);
+                if test_board.has_winner() == Some(self.piece) {
+                    return true;
                 }
-            }
+                // If we would lose, add it to block
+                let mut test_board = *board;
+                test_board.place(*col, self.piece.opponent());
+                if test_board.has_winner() == Some(self.piece.opponent()) {
+                    return true;
+                }
+                false
+            })
+            .collect();
+
+        if winning_moves.is_empty() {
+            Vec::from(options)
+        } else {
+            winning_moves
         }
+    }
 
-        // Otherwise, do the fallback strategy
-        self.fallback.select_from(board, options)
+    fn name(&self) -> &'static str {
+        "TriesToWin"
     }
 }
 
-impl<S: Strategy> std::fmt::Display for Setup<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Setup => {}", self.fallback)
-    }
-}
-
-#[derive(Clone)]
-pub struct ThreeInARow<S: Strategy> {
+pub struct Setup {
     piece: Piece,
-    fallback: Box<S>,
 }
 
-impl<S: Strategy> ThreeInARow<S> {
-    pub fn new(fallback: S, piece: Piece) -> Self {
-        ThreeInARow {
-            piece,
-            fallback: Box::new(fallback),
-        }
+impl Setup {
+    pub fn new(piece: Piece) -> Self {
+        Setup { piece }
     }
 }
 
-impl<S: Strategy> Strategy for ThreeInARow<S> {
-    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
+impl StrategyLayer for Setup {
+    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
+        let setups: Vec<usize> = options
+            .iter()
+            .copied()
+            .filter(|col| {
+                let mut test_board = *board;
+                test_board.place(*col, self.piece);
+                if test_board.has_winner() == Some(self.piece) {
+                    return true;
+                }
+                if !test_board.winning_moves(self.piece).is_empty() {
+                    return true;
+                }
+                false
+            })
+            .collect();
+
+        if setups.is_empty() {
+            Vec::from(options)
+        } else {
+            setups
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "Setup"
+    }
+}
+
+pub struct ThreeInARow {
+    piece: Piece,
+}
+
+impl ThreeInARow {
+    pub fn new(piece: Piece) -> Self {
+        ThreeInARow { piece }
+    }
+}
+
+impl StrategyLayer for ThreeInARow {
+    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
         let mut best = 0;
         let mut best_moves = vec![];
 
         for col in options {
             let mut test_board = *board;
             test_board.place(*col, self.piece);
+            if test_board.has_winner() == Some(self.piece) {
+                return vec![*col];
+            }
             let score = test_board.count_winning_opportunities(self.piece);
             if score > best {
                 best = score;
@@ -161,44 +196,41 @@ impl<S: Strategy> Strategy for ThreeInARow<S> {
             }
         }
 
-        // Run the fallback strategy on the best moves
-        self.fallback.select_from(board, &best_moves)
+        best_moves
     }
-}
 
-impl<S: Strategy> std::fmt::Display for ThreeInARow<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ThreeInARow => {}", self.fallback)
+    fn name(&self) -> &'static str {
+        "ThreeInARow"
     }
 }
 
 /// Strategy that avoids placing pieces in columns that would allow the opponent to win on their next turn.
 pub struct AvoidTraps {
     piece: Piece,
-    fallback: Box<dyn Strategy>,
 }
 
 impl AvoidTraps {
-    pub fn new(fallback: Box<dyn Strategy>, piece: Piece) -> Self {
-        AvoidTraps { piece, fallback }
+    pub fn new(piece: Piece) -> Self {
+        AvoidTraps { piece }
     }
 }
 
-impl Strategy for AvoidTraps {
-    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
+impl StrategyLayer for AvoidTraps {
+    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
         // Disqualify columns that would allow the opponent to win on their next turn
         let mut allowed = Vec::with_capacity(options.len());
 
-        'candidate_loop: for col in options {
+        for col in options {
             let mut test_board = *board;
             test_board.place(*col, self.piece);
             // If this move wins, short-circuit
             if test_board.has_winner() == Some(self.piece) {
-                return Some(*col);
+                allowed.push(*col);
+                continue;
             }
             // No good if the opponent has a winning opportunity
             if !test_board.winning_moves(self.piece.opponent()).is_empty() {
-                continue 'candidate_loop;
+                continue;
             }
             allowed.push(*col);
         }
@@ -206,34 +238,30 @@ impl Strategy for AvoidTraps {
         // If any move loses, we know we're going to lose :(
         // So just pick the first move that we were given
         if allowed.is_empty() {
-            options.first().cloned()
+            Vec::from(options)
         } else {
-            // Run the fallback strategy on the allowed moves
-            self.fallback.select_from(board, &allowed)
+            allowed
         }
     }
-}
 
-impl std::fmt::Display for AvoidTraps {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AvoidTraps => {}", self.fallback)
+    fn name(&self) -> &'static str {
+        "AvoidTraps"
     }
 }
 
 /// Strategy that avoids placing anywhere the other player gets more than one three-in-a-row.
 pub struct AvoidInescapableTraps {
     piece: Piece,
-    fallback: Box<dyn Strategy>,
 }
 
 impl AvoidInescapableTraps {
-    pub fn new(fallback: Box<dyn Strategy>, piece: Piece) -> Self {
-        AvoidInescapableTraps { piece, fallback }
+    pub fn new(piece: Piece) -> Self {
+        AvoidInescapableTraps { piece }
     }
 }
 
-impl Strategy for AvoidInescapableTraps {
-    fn select_from(&self, board: &Board, options: &[usize]) -> Option<usize> {
+impl StrategyLayer for AvoidInescapableTraps {
+    fn prune_from(&self, board: &Board, options: &[usize]) -> Vec<usize> {
         // Disqualify columns that would allow the opponent to win on their next turn
         let mut allowed = Vec::with_capacity(options.len());
 
@@ -242,7 +270,8 @@ impl Strategy for AvoidInescapableTraps {
             test_board.place(*col, self.piece);
             // If this move wins, short-circuit
             if test_board.has_winner() == Some(self.piece) {
-                return Some(*col);
+                allowed.push(*col);
+                continue;
             }
             for next_col in test_board.valid_moves() {
                 let mut next_board = test_board;
@@ -261,16 +290,13 @@ impl Strategy for AvoidInescapableTraps {
         // If any move loses, we know we're going to lose :(
         // So just pick the first move that we were given
         if allowed.is_empty() {
-            options.first().cloned()
+            Vec::from(options)
         } else {
-            // Run the fallback strategy on the allowed moves
-            self.fallback.select_from(board, &allowed)
+            allowed
         }
     }
-}
 
-impl std::fmt::Display for AvoidInescapableTraps {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AvoidInescapableTraps => {}", self.fallback)
+    fn name(&self) -> &'static str {
+        "AvoidInescapableTraps"
     }
 }

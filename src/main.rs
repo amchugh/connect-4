@@ -5,20 +5,19 @@ mod strategy_cache;
 use anyhow::{Context, Result};
 use board::{Board, COLUMNS, Piece};
 use clap::Parser;
-use console::Key;
+use console::{Key, Term};
+use dialoguer::Select;
 use indicatif::{ProgressBar, ProgressStyle};
-use inquire::Select;
 use scopeguard::defer;
 use std::io::Write;
-use std::rc::Rc;
 use std::{
     thread,
     time::{Duration, Instant},
 };
-use strategy::{RandomStrategy, Setup, Strategy, TriesToWin};
+use strategy::{RandomStrategy, Setup, StrategyLayer, TriesToWin};
 
 use crate::board::ROWS;
-use crate::strategy::{AvoidInescapableTraps, AvoidTraps, ThreeInARow};
+use crate::strategy::{AvoidInescapableTraps, AvoidTraps, Connect4AI, StrategyStack, ThreeInARow};
 use crate::strategy_cache::StrategyCache;
 
 #[derive(Parser)]
@@ -34,11 +33,13 @@ struct Cli {
     /// Default: 100,000
     #[arg(short, long)]
     iterations: Option<usize>,
+
+    /// Should we cache strategy decisions
+    #[arg(short = 'c', long = "cache")]
+    use_cache: bool,
 }
 
-type S = Rc<dyn Strategy>;
-
-fn game(red: &S, blue: &S) -> Option<Board> {
+fn game(red: &dyn Connect4AI, blue: &dyn Connect4AI) -> Option<Board> {
     let mut board = Board::new();
     loop {
         // Red plays, then blue.
@@ -58,7 +59,11 @@ fn game(red: &S, blue: &S) -> Option<Board> {
     Some(board)
 }
 
-fn simulate_games(red: S, blue: S, games: usize) -> Result<(usize, usize, usize)> {
+fn simulate_games(
+    red: &dyn Connect4AI,
+    blue: &dyn Connect4AI,
+    games: usize,
+) -> Result<(usize, usize, usize)> {
     let mut red_wins = 0;
     let mut blue_wins = 0;
     let mut ties = 0;
@@ -75,7 +80,7 @@ fn simulate_games(red: S, blue: S, games: usize) -> Result<(usize, usize, usize)
     pb.set_message("Simulating games...");
 
     for _ in 0..games {
-        let result = game(&red, &blue).context("Failed to play game")?;
+        let result = game(red, blue).unwrap();
 
         match result.has_winner() {
             Some(Piece::Red) => red_wins += 1,
@@ -106,7 +111,7 @@ fn play_interactive() -> Result<()> {
     let mut term = console::Term::stdout();
     let mut board = Board::new();
     let mut selection = COLUMNS / 2;
-    let ai = select_strategy(Piece::Blue)?;
+    let ai = build_strategy_stack(Piece::Blue, &term)?;
 
     // Get a move
     // Get the AI response
@@ -222,71 +227,83 @@ fn main() -> Result<()> {
         // Run AI vs AI simulation
         const GAMES: usize = if cfg!(debug_assertions) { 100 } else { 100_000 };
         let games = cli.iterations.unwrap_or(GAMES);
-        return run_simulation(games);
+        return run_simulation(games, cli.use_cache);
     }
 
     // Default behavior: interactive mode
     play_interactive()
 }
 
-fn select_strategy(piece: Piece) -> Result<S> {
-    let strategies: Vec<S> = vec![
-        Rc::new(AvoidInescapableTraps::new(
-            Box::new(AvoidTraps::new(
-                Box::new(TriesToWin::new(
-                    ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
-                    piece,
-                )),
-                piece,
-            )),
-            piece,
-        )),
-        Rc::new(AvoidInescapableTraps::new(
-            Box::new(TriesToWin::new(
-                ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
-                piece,
-            )),
-            piece,
-        )),
-        Rc::new(AvoidTraps::new(
-            Box::new(TriesToWin::new(
-                ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
-                piece,
-            )),
-            piece,
-        )),
-        Rc::new(TriesToWin::new(
-            ThreeInARow::new(Setup::new(RandomStrategy::default(), piece), piece),
-            piece,
-        )),
-        Rc::new(TriesToWin::new(
-            ThreeInARow::new(RandomStrategy::default(), piece),
-            piece,
-        )),
-        Rc::new(TriesToWin::new(
-            Setup::new(RandomStrategy::default(), piece),
-            piece,
-        )),
-        Rc::new(TriesToWin::new(RandomStrategy::default(), piece)),
-        Rc::new(RandomStrategy::default()),
-    ];
-    Ok(Select::new(
-        &format!("Select a strategy for {}", piece.name()),
-        strategies,
-    )
-    .prompt()?)
+fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
+    let mut stack = vec![];
+
+    term.write_line(&format!("Build a strategy stack for {}. Every layer in the stack filters the possible moves. The AI will pick randomly from possible moves at the end.", piece.name()))?;
+
+    enum Option {
+        Done,
+        Strategy(Box<dyn StrategyLayer>),
+    }
+
+    impl std::fmt::Display for Option {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Option::Done => write!(f, "Done"),
+                Option::Strategy(x) => write!(f, "{}", x.name()),
+            }
+        }
+    }
+
+    loop {
+        let strategies: Vec<Option> = vec![
+            Option::Done,
+            Option::Strategy(Box::new(RandomStrategy::default())),
+            Option::Strategy(Box::new(TriesToWin::new(piece))),
+            Option::Strategy(Box::new(Setup::new(piece))),
+            Option::Strategy(Box::new(ThreeInARow::new(piece))),
+            Option::Strategy(Box::new(AvoidTraps::new(piece))),
+            Option::Strategy(Box::new(AvoidInescapableTraps::new(piece))),
+        ];
+
+        let choice = Select::new()
+            .default(0)
+            .with_prompt("Select a strategy")
+            .items(&strategies)
+            .interact_on(term)
+            .unwrap();
+
+        match strategies.into_iter().nth(choice).unwrap() {
+            Option::Done => break,
+            Option::Strategy(strat) => stack.push(strat),
+        }
+    }
+
+    // Clear the lines that we've added
+    term.clear_last_lines(stack.len() + 2)?;
+
+    let stack = StrategyStack::new(stack);
+    Ok(stack)
 }
 
-fn run_simulation(iterations: usize) -> Result<()> {
-    let red = select_strategy(Piece::Red)?;
-    let blue = select_strategy(Piece::Blue)?;
+fn run_simulation(iterations: usize, use_cache: bool) -> Result<()> {
+    let term = console::Term::stdout();
 
-    // Let's use caching for red and blue strategies so they run faster!
-    // let red = Rc::new(StrategyCache::new(red));
-    // let blue = Rc::new(StrategyCache::new(blue));
+    let red: Box<dyn Connect4AI>;
+    let blue: Box<dyn Connect4AI>;
+
+    if use_cache {
+        // Let's use caching for red and blue strategies so they run faster!
+        red = Box::new(StrategyCache::new(build_strategy_stack(Piece::Red, &term)?));
+        blue = Box::new(StrategyCache::new(build_strategy_stack(
+            Piece::Blue,
+            &term,
+        )?));
+    } else {
+        red = Box::new(build_strategy_stack(Piece::Red, &term)?);
+        blue = Box::new(build_strategy_stack(Piece::Blue, &term)?);
+    }
 
     let start = Instant::now();
-    let (red_wins, blue_wins, ties) = simulate_games(red, blue, iterations)?;
+    let (red_wins, blue_wins, ties) = simulate_games(red.as_ref(), blue.as_ref(), iterations)?;
     let duration = start.elapsed();
 
     println!(
