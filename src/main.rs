@@ -14,7 +14,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use strategy::{RandomStrategy, Setup, StrategyLayer, TriesToWin};
+use strategy::{Setup, StrategyLayer, TriesToWin};
 
 use crate::board::ROWS;
 use crate::strategy::{

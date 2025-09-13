@@ -88,26 +88,6 @@ pub trait StrategyLayer {
     fn name(&self) -> &'static str;
 }
 
-#[derive(Clone, Default)]
-pub struct RandomStrategy {}
-
-impl std::fmt::Display for RandomStrategy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RandomStrategy")
-    }
-}
-
-impl StrategyLayer for RandomStrategy {
-    fn prune_from(&self, _: &Board, options: &[usize]) -> Vec<usize> {
-        // Does nothing!
-        Vec::from(options)
-    }
-
-    fn name(&self) -> &'static str {
-        "RandomStrategy"
-    }
-}
-
 pub struct TriesToWin {
     piece: Piece,
 }
