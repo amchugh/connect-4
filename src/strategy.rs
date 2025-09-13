@@ -103,13 +103,13 @@ impl StrategyDecider for TriesToWin {
         for col in options {
             // If we could win, add it.
             let mut test_board = *board;
-            test_board.place(*col, self.piece);
+            test_board.with_place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
                 return Some(*col);
             }
             // If we would lose, add it to block
             let mut test_board = *board;
-            test_board.place(*col, self.piece.opponent());
+            test_board.with_place(*col, self.piece.opponent());
             if test_board.has_winner() == Some(self.piece.opponent()) {
                 return Some(*col);
             }
@@ -136,7 +136,7 @@ impl StrategyDecider for Setup {
     fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
         for col in options {
             let mut test_board = *board;
-            test_board.place(*col, self.piece);
+            test_board.with_place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
                 return Some(*col);
             }
@@ -169,7 +169,7 @@ impl StrategyLayer for ThreeInARow {
 
         for col in options {
             let mut test_board = *board;
-            test_board.place(*col, self.piece);
+            test_board.with_place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
                 return vec![*col];
             }
@@ -210,7 +210,7 @@ impl StrategyLayer for AvoidTraps {
 
         for col in options {
             let mut test_board = *board;
-            test_board.place(*col, self.piece);
+            test_board.with_place(*col, self.piece);
             // If this move wins, short-circuit
             if test_board.has_winner() == Some(self.piece) {
                 allowed.push(*col);
@@ -249,7 +249,7 @@ impl StrategyLayer for AvoidInescapableTraps {
 
         'candidate_loop: for col in options {
             let mut test_board = *board;
-            test_board.place(*col, self.piece);
+            test_board.with_place(*col, self.piece);
             // If this move wins, short-circuit
             if test_board.has_winner() == Some(self.piece) {
                 allowed.push(*col);
@@ -257,7 +257,7 @@ impl StrategyLayer for AvoidInescapableTraps {
             }
             for next_col in test_board.valid_moves() {
                 let mut next_board = test_board;
-                next_board.place(next_col, self.piece.opponent());
+                next_board.with_place(next_col, self.piece.opponent());
                 // If we've lost or have a losing position, don't take it.
                 if test_board.has_winner() == Some(self.piece.opponent()) {
                     continue 'candidate_loop;
@@ -274,5 +274,85 @@ impl StrategyLayer for AvoidInescapableTraps {
 
     fn name(&self) -> &'static str {
         "AvoidInescapableTraps"
+    }
+}
+
+/// Strategy that searches for an unstoppable move with a given depth
+pub struct SearchForWin {
+    piece: Piece,
+    depth: usize,
+}
+
+impl SearchForWin {
+    pub fn new(piece: Piece, depth: usize) -> Self {
+        SearchForWin { piece, depth }
+    }
+
+    fn has_guaranteed_win(&self, board: &Board, depth: usize) -> bool {
+        assert!(board.next_player() == self.piece.opponent());
+
+        // If we've won, we've won.
+        if board.has_winner() == Some(self.piece) {
+            return true;
+        }
+
+        // Otherwise, if this is our search depth, we can't guarantee a win
+        if depth == 0 {
+            return false;
+        }
+
+        // Otherwise, we need to look at all of the possible ways the enemy could respond
+        // and see if we can win no matter what they pick.
+        let enemy_moves = board.all_future_boards(self.piece.opponent());
+        enemy_moves.into_iter().all(|board| {
+            // Get all the ways we could respond
+            let our_moves = board.all_future_boards(self.piece);
+            // Check if _any_ of our responses guarantee a win
+            our_moves
+                .into_iter()
+                .any(|board| self.has_guaranteed_win(&board, depth - 1))
+        })
+    }
+}
+
+impl StrategyDecider for SearchForWin {
+    fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
+        // Let's only start looking after at least N pieces have been played...
+        const MIN_PIECES_PLAYED: usize = 20;
+        if board.num_pieces_played() < MIN_PIECES_PLAYED {
+            return None;
+        }
+
+        for col in options {
+            let board = board.place(*col, self.piece);
+            if self.has_guaranteed_win(&board, self.depth) {
+                return Some(*col);
+            }
+        }
+
+        None
+    }
+
+    fn name(&self) -> &'static str {
+        "SearchForWin"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        board::{Board, Piece},
+        strategy::{SearchForWin, StrategyDecider},
+    };
+
+    #[test]
+    fn search_for_win() {
+        let board = "!   RB/   BR/ BRBB/ RBBB/ RRRB/BRRBR R";
+        let board = Board::from(board);
+        dbg!(board);
+        let strategy = SearchForWin::new(Piece::Red, 1);
+        let options = board.valid_moves();
+        let choice = strategy.choose(&board, &options);
+        assert!(choice.is_some());
     }
 }

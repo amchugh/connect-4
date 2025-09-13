@@ -32,6 +32,7 @@ impl Piece {
 pub struct Board {
     state: [[Piece; COLUMNS]; ROWS],
     pieces_played: usize,
+    next_player: Piece,
 }
 
 impl std::cmp::PartialEq for Board {
@@ -59,10 +60,95 @@ impl Board {
         Board {
             state: [[Piece::Empty; COLUMNS]; ROWS],
             pieces_played: 0,
+            next_player: Piece::Red,
         }
     }
 
-    pub fn place(&mut self, column: usize, piece: Piece) {
+    pub fn from(board: &str) -> Self {
+        // Assumes the board is like the following:
+        // "!///    B/    B/  BRRRR"
+        assert!(board.starts_with("!"));
+        let (_, board) = board.split_at(1);
+        let lines: Vec<_> = board.split("/").collect();
+        assert!(
+            lines.len() == ROWS,
+            "Wrong number of rows, expected {}, got {}",
+            ROWS,
+            lines.len()
+        );
+
+        let mut board = Board::new();
+        let mut red_played = 0;
+        let mut blue_played = 0;
+
+        for (row, line) in lines.iter().enumerate() {
+            assert!(
+                line.len() <= COLUMNS,
+                "Invalid number of columns, max {}, got {}",
+                COLUMNS,
+                line.len()
+            );
+            for (col, c) in line.chars().enumerate() {
+                match c {
+                    ' ' => board.state[row][col] = Piece::Empty,
+                    'R' => {
+                        board.state[row][col] = Piece::Red;
+                        red_played += 1;
+                    }
+                    'B' => {
+                        board.state[row][col] = Piece::Blue;
+                        blue_played += 1;
+                    }
+                    _ => panic!("Invalid character"),
+                }
+            }
+        }
+        assert!(red_played == blue_played || red_played == blue_played + 1);
+        board.next_player = if red_played > blue_played {
+            Piece::Blue
+        } else {
+            Piece::Red
+        };
+        board.pieces_played = red_played + blue_played;
+        board
+    }
+
+    pub fn short_string(&self) -> String {
+        let mut s = String::with_capacity((ROWS + 1) * COLUMNS + 1);
+        s.push('!');
+        for row in 0..ROWS {
+            let mut leading_spaces = 0;
+            for col in 0..COLUMNS {
+                match self.state[row][col] {
+                    Piece::Empty => leading_spaces += 1,
+                    Piece::Red => {
+                        if leading_spaces > 0 {
+                            for _ in 0..leading_spaces {
+                                s.push(' ');
+                            }
+                            leading_spaces = 0;
+                        }
+                        s.push('R');
+                    }
+                    Piece::Blue => {
+                        if leading_spaces > 0 {
+                            for _ in 0..leading_spaces {
+                                s.push(' ');
+                            }
+                            leading_spaces = 0;
+                        }
+                        s.push('B');
+                    }
+                }
+            }
+            if row < ROWS - 1 {
+                s.push('/');
+            }
+        }
+        s
+    }
+
+    fn _place(&mut self, column: usize, piece: Piece) {
         debug_assert!((0..COLUMNS).contains(&column));
         debug_assert!(self.state[0][column] == Piece::Empty);
 
@@ -76,7 +162,24 @@ impl Board {
         unreachable!("Column is full");
     }
 
-    pub fn get_num_pieces_played(&self) -> usize {
+    pub fn with_place(&mut self, column: usize, piece: Piece) {
+        debug_assert!(piece == self.next_player);
+        self.next_player = piece.opponent();
+        self._place(column, piece);
+    }
+
+    pub fn place(&self, column: usize, piece: Piece) -> Board {
+        let mut next_state = *self;
+        next_state._place(column, piece);
+        next_state.next_player = piece.opponent();
+        next_state
+    }
+
+    pub fn next_player(&self) -> Piece {
+        self.next_player
+    }
+
+    pub fn num_pieces_played(&self) -> usize {
         self.pieces_played
     }
 
@@ -96,6 +199,22 @@ impl Board {
             .or_else(|| self.check_diagonals())
     }
 
+    pub fn winning_opportunity(&self, piece: Piece) -> Option<usize> {
+        for col in self.valid_moves() {
+            let board = self.place(col, piece);
+            if board.has_winner() == Some(piece) {
+                return Some(col);
+            }
+        }
+        None
+    }
+    pub fn all_future_boards(&self, piece: Piece) -> Vec<Self> {
+        self.valid_moves()
+            .into_iter()
+            .map(|col| self.place(col, piece))
+            .collect()
+    }
+
     /// Returns a vector of valid moves that would result in a win for the given piece.
     pub fn winning_moves(&self, piece: Piece) -> Vec<usize> {
         // Doesn't make sense to ask for winning moves if someone already won
@@ -103,7 +222,7 @@ impl Board {
         let mut winning_moves = Vec::new();
         for m in self.valid_moves() {
             let mut next_board = *self;
-            next_board.place(m, piece);
+            next_board.with_place(m, piece);
             if next_board.has_winner() == Some(piece) {
                 winning_moves.push(m)
             }
@@ -324,17 +443,17 @@ mod tests {
         let mut board2 = Board::new();
         assert_eq!(board1, board2);
 
-        board1.place(0, Piece::Red);
-        board2.place(0, Piece::Red);
+        board1.with_place(0, Piece::Red);
+        board2.with_place(0, Piece::Red);
         assert_eq!(board1, board2);
 
-        board1.place(1, Piece::Blue);
-        board2.place(2, Piece::Red);
+        board1.with_place(1, Piece::Blue);
+        board2.with_place(2, Piece::Red);
         assert_ne!(board1, board2);
 
         // Order doesn't matter
-        board1.place(2, Piece::Red);
-        board2.place(1, Piece::Blue);
+        board1.with_place(2, Piece::Red);
+        board2.with_place(1, Piece::Blue);
         assert_eq!(board1, board2);
     }
 
@@ -349,9 +468,9 @@ mod tests {
     fn test_count_winning_opportunities_horizontal() {
         let mut board = Board::new();
         // Place three red pieces horizontally: RRR_
-        board.place(0, Piece::Red);
-        board.place(1, Piece::Red);
-        board.place(2, Piece::Red);
+        board.with_place(0, Piece::Red);
+        board.with_place(1, Piece::Red);
+        board.with_place(2, Piece::Red);
 
         // Should have 1 winning opportunity (can complete at column 3)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -362,9 +481,9 @@ mod tests {
     fn test_count_winning_opportunities_horizontal_gap_in_middle() {
         let mut board = Board::new();
         // Place RR_R pattern
-        board.place(0, Piece::Red);
-        board.place(1, Piece::Red);
-        board.place(3, Piece::Red);
+        board.with_place(0, Piece::Red);
+        board.with_place(1, Piece::Red);
+        board.with_place(3, Piece::Red);
 
         // Should have 1 winning opportunity (can complete at column 2)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -375,9 +494,9 @@ mod tests {
     fn test_count_winning_opportunities_horizontal_gap_at_start() {
         let mut board = Board::new();
         // Place _RRR pattern
-        board.place(1, Piece::Red);
-        board.place(2, Piece::Red);
-        board.place(3, Piece::Red);
+        board.with_place(1, Piece::Red);
+        board.with_place(2, Piece::Red);
+        board.with_place(3, Piece::Red);
 
         // This creates two overlapping opportunities:
         // _RRR (positions 0-3) and RRR_ (positions 1-4)
@@ -389,9 +508,9 @@ mod tests {
     fn test_count_winning_opportunities_vertical() {
         let mut board = Board::new();
         // Place three red pieces vertically in column 0
-        board.place(0, Piece::Red);
-        board.place(0, Piece::Red);
-        board.place(0, Piece::Red);
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Red);
 
         // Should have 1 winning opportunity (can complete by placing on top)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -403,14 +522,14 @@ mod tests {
         let mut board = Board::new();
         // Create a diagonal pattern (bottom-left to top-right)
         // Place pieces to build up the diagonal
-        board.place(0, Piece::Red); // Bottom of column 0
+        board.with_place(0, Piece::Red); // Bottom of column 0
 
-        board.place(1, Piece::Blue); // Bottom of column 1
-        board.place(1, Piece::Red); // Second level of column 1
+        board.with_place(1, Piece::Blue); // Bottom of column 1
+        board.with_place(1, Piece::Red); // Second level of column 1
 
-        board.place(2, Piece::Blue); // Bottom of column 2
-        board.place(2, Piece::Blue); // Second level of column 2
-        board.place(2, Piece::Red); // Third level of column 2
+        board.with_place(2, Piece::Blue); // Bottom of column 2
+        board.with_place(2, Piece::Blue); // Second level of column 2
+        board.with_place(2, Piece::Red); // Third level of column 2
 
         // Now we have a diagonal RRR_ pattern, missing the top-right piece
         // Should have 1 winning opportunity
@@ -424,19 +543,19 @@ mod tests {
         // We need to build up the columns to the right heights
 
         // Column 0: need red at row 2 (third from top)
-        board.place(0, Piece::Blue); // Row 5 (bottom)
-        board.place(0, Piece::Blue); // Row 4
-        board.place(0, Piece::Blue); // Row 3
-        board.place(0, Piece::Red); // Row 2
+        board.with_place(0, Piece::Blue); // Row 5 (bottom)
+        board.with_place(0, Piece::Blue); // Row 4
+        board.with_place(0, Piece::Blue); // Row 3
+        board.with_place(0, Piece::Red); // Row 2
 
         // Column 1: need red at row 3
-        board.place(1, Piece::Blue); // Row 5
-        board.place(1, Piece::Blue); // Row 4
-        board.place(1, Piece::Red); // Row 3
+        board.with_place(1, Piece::Blue); // Row 5
+        board.with_place(1, Piece::Blue); // Row 4
+        board.with_place(1, Piece::Red); // Row 3
 
         // Column 2: need red at row 4
-        board.place(2, Piece::Blue); // Row 5
-        board.place(2, Piece::Red); // Row 4
+        board.with_place(2, Piece::Blue); // Row 5
+        board.with_place(2, Piece::Red); // Row 4
 
         // Column 3: needs to be empty at row 5 for the opportunity
         // Don't place anything in column 3
@@ -449,10 +568,10 @@ mod tests {
     fn test_count_winning_opportunities_blocked_by_opponent() {
         let mut board = Board::new();
         // Place RRR but then block with opponent piece
-        board.place(0, Piece::Red);
-        board.place(1, Piece::Red);
-        board.place(2, Piece::Red);
-        board.place(3, Piece::Blue); // Block the winning opportunity
+        board.with_place(0, Piece::Red);
+        board.with_place(1, Piece::Red);
+        board.with_place(2, Piece::Red);
+        board.with_place(3, Piece::Blue); // Block the winning opportunity
 
         // Should have 0 winning opportunities because opponent piece blocks
         assert_eq!(board.count_winning_opportunities(Piece::Red), 0);
@@ -464,14 +583,14 @@ mod tests {
         let mut board = Board::new();
         // Create a simple case with clear multiple opportunities
         // Bottom row: RRR_
-        board.place(0, Piece::Red);
-        board.place(1, Piece::Red);
-        board.place(2, Piece::Red);
+        board.with_place(0, Piece::Red);
+        board.with_place(1, Piece::Red);
+        board.with_place(2, Piece::Red);
 
         // Create a separate vertical opportunity in column 6
-        board.place(6, Piece::Red);
-        board.place(6, Piece::Red);
-        board.place(6, Piece::Red);
+        board.with_place(6, Piece::Red);
+        board.with_place(6, Piece::Red);
+        board.with_place(6, Piece::Red);
 
         // Should have at least 2 opportunities: horizontal and vertical
         assert_eq!(board.count_winning_opportunities(Piece::Red), 2);
@@ -481,9 +600,9 @@ mod tests {
     fn test_count_winning_opportunities_r_gap_rr_pattern() {
         let mut board = Board::new();
         // Create R_RR pattern
-        board.place(0, Piece::Red);
-        board.place(2, Piece::Red);
-        board.place(3, Piece::Red);
+        board.with_place(0, Piece::Red);
+        board.with_place(2, Piece::Red);
+        board.with_place(3, Piece::Red);
 
         // Should have 1 winning opportunity (can complete at column 1)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);

@@ -8,7 +8,6 @@ use clap::Parser;
 use console::{Key, Term};
 use dialoguer::Select;
 use indicatif::{ProgressBar, ProgressStyle};
-use scopeguard::defer;
 use std::io::Write;
 use std::{
     thread,
@@ -18,8 +17,8 @@ use strategy::{Setup, StrategyLayer, TriesToWin};
 
 use crate::board::ROWS;
 use crate::strategy::{
-    AvoidInescapableTraps, AvoidTraps, Connect4AI, Strategy, StrategyDecider, StrategyStack,
-    ThreeInARow,
+    AvoidInescapableTraps, AvoidTraps, Connect4AI, SearchForWin, Strategy, StrategyDecider,
+    StrategyStack, ThreeInARow,
 };
 use crate::strategy_cache::StrategyCache;
 
@@ -51,13 +50,13 @@ fn game(red: &dyn Connect4AI, blue: &dyn Connect4AI) -> Option<Board> {
             break;
         }
         let col = red.play(&board)?;
-        board.place(col, Piece::Red);
+        board.with_place(col, Piece::Red);
 
         if board.has_winner().is_some() || board.valid_moves().is_empty() {
             break;
         }
         let col = blue.play(&board)?;
-        board.place(col, Piece::Blue);
+        board.with_place(col, Piece::Blue);
     }
     Some(board)
 }
@@ -123,10 +122,6 @@ fn play_interactive() -> Result<()> {
     // Repeat
 
     term.hide_cursor()?;
-    let dropterm = term.clone();
-    defer! {
-        let _ = dropterm.show_cursor();
-    };
     writeln!(term, "You are Red. You are playing against {}", ai)?;
     term.write_line("")?;
 
@@ -142,6 +137,13 @@ fn play_interactive() -> Result<()> {
                 match key {
                     Key::Unknown => anyhow::bail!("Problem"),
                     Key::Char('q') => anyhow::bail!("Quit!"),
+                    Key::Char('p') => {
+                        term.clear_line()?;
+                        term.clear_last_lines(ROWS + 2)?;
+                        writeln!(term, "{}", &board.short_string())?;
+                        write!(term, "\n{}\n", board)?;
+                        continue 'selection;
+                    }
                     Key::ArrowLeft | Key::Char('a') => {
                         selection = selection.saturating_sub(1);
                         break 'key;
@@ -162,7 +164,7 @@ fn play_interactive() -> Result<()> {
         }
 
         // Make the move
-        board.place(selection, Piece::Red);
+        board.with_place(selection, Piece::Red);
 
         // Update the board display
         term.clear_line()?;
@@ -172,10 +174,15 @@ fn play_interactive() -> Result<()> {
         // Is the game over?
         if let Some(winner) = board.has_winner() {
             match winner {
-                Piece::Red => writeln!(term, "Red wins.")?,
-                Piece::Blue => writeln!(term, "Blue wins.")?,
+                Piece::Red => {
+                    writeln!(term, "Red wins after {} moves.", board.num_pieces_played())?
+                }
+                Piece::Blue => {
+                    writeln!(term, "Blue wins after {} moves.", board.num_pieces_played())?
+                }
                 Piece::Empty => unreachable!(),
             }
+            term.show_cursor()?;
             return Ok(());
         }
 
@@ -189,7 +196,7 @@ fn play_interactive() -> Result<()> {
         thread::sleep(Duration::from_millis(500));
         // Make the AI move
         let ai_move = ai.play(&board).context("Failed to get AI move");
-        board.place(ai_move?, Piece::Blue);
+        board.with_place(ai_move?, Piece::Blue);
 
         // Update the board display
         term.clear_line()?;
@@ -199,16 +206,12 @@ fn play_interactive() -> Result<()> {
         // Is the game over?
         if let Some(winner) = board.has_winner() {
             match winner {
-                Piece::Red => writeln!(
-                    term,
-                    "Red wins after {} moves.",
-                    board.get_num_pieces_played()
-                )?,
-                Piece::Blue => writeln!(
-                    term,
-                    "Blue wins after {} moves.",
-                    board.get_num_pieces_played()
-                )?,
+                Piece::Red => {
+                    writeln!(term, "Red wins after {} moves.", board.num_pieces_played())?
+                }
+                Piece::Blue => {
+                    writeln!(term, "Blue wins after {} moves.", board.num_pieces_played())?
+                }
                 Piece::Empty => unreachable!(),
             }
             term.show_cursor()?;
@@ -261,6 +264,7 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
     loop {
         let strategies: Vec<Option> = vec![
             Option::Done,
+            Option::Decider(Box::new(SearchForWin::new(piece, 3))),
             Option::Layer(Box::new(AvoidInescapableTraps::new(piece))),
             Option::Layer(Box::new(AvoidTraps::new(piece))),
             Option::Layer(Box::new(ThreeInARow::new(piece))),
