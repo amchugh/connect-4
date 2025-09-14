@@ -1,4 +1,5 @@
 mod board;
+mod search_for_win;
 mod strategy;
 mod strategy_cache;
 
@@ -16,6 +17,7 @@ use std::{
 use strategy::{Setup, StrategyLayer, TriesToWin};
 
 use crate::board::ROWS;
+use crate::search_for_win::SearchForWinCache;
 use crate::strategy::{
     AvoidInescapableTraps, AvoidTraps, Connect4AI, SearchForWin, Strategy, StrategyDecider,
     StrategyStack, ThreeInARow,
@@ -255,8 +257,8 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 Option::Done => write!(f, "Done"),
-                Option::Layer(x) => write!(f, "Decider: {}", x.name()),
-                Option::Decider(x) => write!(f, "Filter Layer: {}", x.name()),
+                Option::Layer(x) => write!(f, "Filter Layer: {}", x.name()),
+                Option::Decider(x) => write!(f, "Decider: {}", x.name()),
             }
         }
     }
@@ -265,6 +267,7 @@ fn build_strategy_stack(piece: Piece, term: &Term) -> Result<StrategyStack> {
         let strategies: Vec<Option> = vec![
             Option::Done,
             Option::Decider(Box::new(SearchForWin::new(piece, 3))),
+            Option::Decider(Box::new(SearchForWinCache::new(piece, 6))),
             Option::Layer(Box::new(AvoidInescapableTraps::new(piece))),
             Option::Layer(Box::new(AvoidTraps::new(piece))),
             Option::Layer(Box::new(ThreeInARow::new(piece))),

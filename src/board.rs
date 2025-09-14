@@ -64,55 +64,6 @@ impl Board {
         }
     }
 
-    pub fn from(board: &str) -> Self {
-        // Assumes the board is like the following:
-        // "!///    B/    B/  BRRRR"
-        assert!(board.starts_with("!"));
-        let (_, board) = board.split_at(1);
-        let lines: Vec<_> = board.split("/").collect();
-        assert!(
-            lines.len() == ROWS,
-            "Wrong number of rows, expected {}, got {}",
-            ROWS,
-            lines.len()
-        );
-
-        let mut board = Board::new();
-        let mut red_played = 0;
-        let mut blue_played = 0;
-
-        for (row, line) in lines.iter().enumerate() {
-            assert!(
-                line.len() <= COLUMNS,
-                "Invalid number of columns, max {}, got {}",
-                COLUMNS,
-                line.len()
-            );
-            for (col, c) in line.chars().enumerate() {
-                match c {
-                    ' ' => board.state[row][col] = Piece::Empty,
-                    'R' => {
-                        board.state[row][col] = Piece::Red;
-                        red_played += 1;
-                    }
-                    'B' => {
-                        board.state[row][col] = Piece::Blue;
-                        blue_played += 1;
-                    }
-                    _ => panic!("Invalid character"),
-                }
-            }
-        }
-        assert!(red_played == blue_played || red_played == blue_played + 1);
-        board.next_player = if red_played > blue_played {
-            Piece::Blue
-        } else {
-            Piece::Red
-        };
-        board.pieces_played = red_played + blue_played;
-        board
-    }
-
     pub fn short_string(&self) -> String {
         let mut s = String::with_capacity((ROWS + 1) * COLUMNS + 1);
         s.push('!');
@@ -436,6 +387,57 @@ impl Default for Board {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Board {
+        pub fn from(board: &str) -> Self {
+            // Assumes the board is like the following:
+            // "!///    B/    B/  BRRRR"
+            assert!(board.starts_with("!"));
+            let (_, board) = board.split_at(1);
+            let lines: Vec<_> = board.split("/").collect();
+            assert!(
+                lines.len() == ROWS,
+                "Wrong number of rows, expected {}, got {}",
+                ROWS,
+                lines.len()
+            );
+
+            let mut board = Board::new();
+            let mut red_played = 0;
+            let mut blue_played = 0;
+
+            for (row, line) in lines.iter().enumerate() {
+                assert!(
+                    line.len() <= COLUMNS,
+                    "Invalid number of columns, max {}, got {}",
+                    COLUMNS,
+                    line.len()
+                );
+                for (col, c) in line.chars().enumerate() {
+                    match c {
+                        ' ' => board.state[row][col] = Piece::Empty,
+                        'R' => {
+                            board.state[row][col] = Piece::Red;
+                            red_played += 1;
+                        }
+                        'B' => {
+                            board.state[row][col] = Piece::Blue;
+                            blue_played += 1;
+                        }
+                        _ => panic!("Invalid character"),
+                    }
+                }
+            }
+            assert!(red_played == blue_played || red_played == blue_played + 1);
+            board.next_player = if red_played > blue_played {
+                Piece::Blue
+            } else {
+                Piece::Red
+            };
+            board.pieces_played = red_played + blue_played;
+            board
+        }
+    }
 
     #[test]
     fn test_eq() {

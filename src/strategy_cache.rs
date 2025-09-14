@@ -14,6 +14,7 @@ use crate::{
 
 type BoardCache = HashMap<Board, Vec<usize>>;
 
+#[derive(Clone, Copy, Default)]
 pub struct StrategyCacheStats {
     pub hits: u64,
     pub misses: u64,
