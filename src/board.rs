@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, hint::unreachable_unchecked};
 
 pub const ROWS: usize = 6;
 pub const COLUMNS: usize = 7;
@@ -11,6 +11,7 @@ pub enum Piece {
 }
 
 impl Piece {
+    #[inline]
     pub fn opponent(&self) -> Piece {
         match self {
             Piece::Empty => panic!("Cannot get opponent of empty piece"),
@@ -19,6 +20,7 @@ impl Piece {
         }
     }
 
+    #[inline]
     pub fn name(&self) -> &'static str {
         match self {
             Piece::Red => "Red",
@@ -28,39 +30,117 @@ impl Piece {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Board {
-    state: [[Piece; COLUMNS]; ROWS],
-    pieces_played: usize,
-    next_player: Piece,
-}
+///
+/// The board is 6 rows by 7 columns in size.
+///
+/// Every column is represented with 9 bits.
+///
+/// Bits 0-2 store a 3-bit number encoding the height of the current column.
+/// Note that 7 is never used, so this isn’t the most efficient packing.
+///
+/// Bits 3-8 store the piece data. A zero represents a red piece while a
+/// one represents a yellow piece. Only the first N bits determined by the
+/// first 3 bits are valid. The rest is padded with 0s to keep implementation
+/// clean. Again, not the most efficient packing but the next breakpoint (32b)
+/// is so far away.
+///
+/// Seven columns of 9 bits gives 63b representation, meaning you can pack
+/// any* board in one 64b integer.
+///
+/// 0: 76543210 -- unused,
+/// 1: 76543210
+/// 2: 76543210
+/// 3: 76543210
+/// 4: 76543210
+/// 5: 76543210 -- [10] -> last of column 2 data, [432] -> column 3 height, ... etc.
+/// 6: 76543210 -- [0] -> last bit of column 1 data, [321] -> column 2 height, [7654] -> column 2 data
+/// 7: 76543210 -- [210] -> column 1 height, [76543] -> first 5 bits of column 1 data
+///
+///
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Board(u64);
 
-impl std::cmp::PartialEq for Board {
-    fn eq(&self, other: &Self) -> bool {
-        for row in 0..ROWS {
-            for col in 0..COLUMNS {
-                if self.state[row][col] != other.state[row][col] {
-                    return false;
-                }
-            }
-        }
-        true
-    }
-}
-impl std::cmp::Eq for Board {}
-
-impl std::hash::Hash for Board {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.state.hash(state);
-    }
-}
+type BoardArray = [[Piece; COLUMNS]; ROWS];
 
 impl Board {
+    pub const EMPTY: Board = Board(0);
+
+    #[inline]
     pub fn new() -> Self {
-        Board {
-            state: [[Piece::Empty; COLUMNS]; ROWS],
-            pieces_played: 0,
-            next_player: Piece::Red,
+        Board::EMPTY
+    }
+
+    fn from_array(arr: BoardArray) -> Self {
+        let mut board = Board::EMPTY;
+        for column in 0..COLUMNS {
+            let mut height = 0;
+            // We will end with setting the column height
+            // Allow the range loop so that the compiler can unroll this.
+            #[allow(clippy::needless_range_loop)]
+            for row in 0..ROWS {
+                let row_idx = ROWS - row - 1;
+                let piece = arr[row_idx][column];
+                match piece {
+                    Piece::Empty => break,
+                    Piece::Red => {
+                        // Don't need to do anything as they are by-default red.
+                        debug_assert!(board.get_raw(column, row) == Piece::Red, "{board}");
+                    }
+                    Piece::Blue => {
+                        // Need to set that piece blue
+                        board.set_blue(column, row);
+                    }
+                }
+                height += 1;
+            }
+            // Set the column height
+            board.set_column_height(column, height);
+        }
+        board
+    }
+
+    #[inline]
+    fn column_height(&self, column: usize) -> usize {
+        debug_assert!(column < COLUMNS, "Column must be on the board");
+
+        const MASK: u64 = 0b111; // Column height is 3 bits
+        let value = self.0 >> (column * 9);
+        (value & MASK) as usize
+    }
+
+    #[inline]
+    fn to_array(self) -> BoardArray {
+        let mut arr = [[Piece::Empty; COLUMNS]; ROWS];
+        for column in 0..COLUMNS {
+            let height = self.column_height(column);
+            for row in 0..height {
+                let row_idx = ROWS - row - 1;
+                arr[row_idx][column] = self.get_checked(column, row);
+            }
+        }
+        arr
+    }
+
+    #[inline]
+    fn get_raw(&self, column: usize, row: usize) -> Piece {
+        const COLUMN_HEIGHT_OFFSET: usize = 3;
+        let value = self.0 >> ((column * 9) + row + COLUMN_HEIGHT_OFFSET);
+        match value & 0b1 {
+            0 => Piece::Red,
+            1 => Piece::Blue,
+            // Obviously this value can only be 0 or 1.
+            _ => unsafe { unreachable_unchecked() },
+        }
+    }
+
+    #[inline]
+    fn get_checked(&self, column: usize, row: usize) -> Piece {
+        let height = self.column_height(column);
+        if height <= row {
+            Piece::Empty
+        } else {
+            self.get_raw(column, row)
         }
     }
 
@@ -78,9 +158,7 @@ impl Board {
             lines.len()
         );
 
-        let mut board = Board::new();
-        let mut red_played = 0;
-        let mut blue_played = 0;
+        let mut board_array = [[Piece::Empty; COLUMNS]; ROWS];
 
         for (row, line) in lines.iter().enumerate() {
             assert!(
@@ -91,36 +169,46 @@ impl Board {
             );
             for (col, c) in line.chars().enumerate() {
                 match c {
-                    ' ' => board.state[row][col] = Piece::Empty,
+                    ' ' => board_array[row][col] = Piece::Empty,
                     'R' => {
-                        board.state[row][col] = Piece::Red;
-                        red_played += 1;
+                        board_array[row][col] = Piece::Red;
                     }
                     'B' => {
-                        board.state[row][col] = Piece::Blue;
-                        blue_played += 1;
+                        board_array[row][col] = Piece::Blue;
                     }
                     _ => panic!("Invalid character"),
                 }
             }
         }
-        assert!(red_played == blue_played || red_played == blue_played + 1);
-        board.next_player = if red_played > blue_played {
-            Piece::Blue
-        } else {
-            Piece::Red
-        };
-        board.pieces_played = red_played + blue_played;
-        board
+
+        // As a debug measure, make sure the board is balanced
+        #[cfg(debug_assertions)]
+        {
+            let mut red_played = 0;
+            let mut blue_played = 0;
+            for row in board_array {
+                for piece in row {
+                    match piece {
+                        Piece::Red => red_played += 1,
+                        Piece::Blue => blue_played += 1,
+                        _ => {}
+                    }
+                }
+            }
+            debug_assert!(red_played == blue_played || red_played == blue_played + 1);
+        }
+
+        Board::from_array(board_array)
     }
 
     pub fn short_string(&self) -> String {
         let mut s = String::with_capacity((ROWS + 1) * COLUMNS + 1);
         s.push('!');
-        for row in 0..ROWS {
+        let repr = self.to_array();
+        for (idx, row) in repr.into_iter().enumerate() {
             let mut leading_spaces = 0;
-            for col in 0..COLUMNS {
-                match self.state[row][col] {
+            for piece in row {
+                match piece {
                     Piece::Empty => leading_spaces += 1,
                     Piece::Red => {
                         if leading_spaces > 0 {
@@ -142,53 +230,107 @@ impl Board {
                     }
                 }
             }
-            if row < ROWS - 1 {
+            if idx < ROWS - 1 {
                 s.push('/');
             }
         }
         s
     }
 
-    fn _place(&mut self, column: usize, piece: Piece) {
-        debug_assert!((0..COLUMNS).contains(&column));
-        debug_assert!(self.state[0][column] == Piece::Empty);
+    #[inline]
+    fn set_blue(&mut self, column: usize, height: usize) {
+        debug_assert!(column < COLUMNS, "Column must be on the board");
+        debug_assert!(height < ROWS, "Cannot overfill a column");
 
-        self.pieces_played += 1;
-        for row in (0..ROWS).rev() {
-            if self.state[row][column] == Piece::Empty {
-                self.state[row][column] = piece;
-                return;
-            }
-        }
-        unreachable!("Column is full");
+        // We need to set this to a 1.
+        let placed_value = 1 << ((column * 9) + 3 + height);
+        self.0 |= placed_value;
     }
 
+    #[inline]
+    fn set_column_height(&mut self, column: usize, height: usize) {
+        debug_assert!(column < COLUMNS, "Column must be on the board");
+        debug_assert!(height <= ROWS, "Cannot overfill a column");
+        // Create the mask to remove the current height. We will then OR it in.
+        let mask = 0b111 << (column * 9);
+        let height_placed = (height as u64) << (column * 9);
+        let value = (self.0 & !mask) | height_placed;
+        self.0 = value;
+    }
+
+    #[inline]
     pub fn with_place(&mut self, column: usize, piece: Piece) {
-        debug_assert!(piece == self.next_player);
-        self.next_player = piece.opponent();
-        self._place(column, piece);
+        debug_assert!(
+            piece != Piece::Empty,
+            "Should never try and place an empty piece"
+        );
+        debug_assert!(column < COLUMNS, "Column must be on the board");
+
+        let height = self.column_height(column);
+        debug_assert!(height < ROWS - 1, "Column is full");
+
+        // Need to increment the column height
+        self.set_column_height(column, height + 1);
+
+        // Need to set the piece to the correct value
+        match piece {
+            Piece::Red => {
+                // We need to set this to a 0... but by definition it should be 0 already.
+                debug_assert!(self.get_checked(column, height) == Piece::Red);
+            }
+            Piece::Blue => {
+                self.set_blue(column, height);
+            }
+            Piece::Empty => unreachable!(),
+        }
     }
 
     pub fn place(&self, column: usize, piece: Piece) -> Board {
         let mut next_state = *self;
-        next_state._place(column, piece);
-        next_state.next_player = piece.opponent();
+        next_state.with_place(column, piece);
         next_state
     }
 
     pub fn next_player(&self) -> Piece {
-        self.next_player
+        // This is a bit expensive to calculate...
+        let mut red_pieces = 0;
+        let mut blue_pieces = 0;
+        for column in 0..COLUMNS {
+            let height = self.column_height(column);
+            if height == 0 {
+                continue;
+            }
+            let column_data_mask = 0b111111 >> (6 - height);
+            let column_data = (self.0 >> (3 + column * 9)) & column_data_mask;
+            let ones = column_data.count_ones();
+            blue_pieces += ones;
+            red_pieces += (height as u32) - ones;
+        }
+        assert!(
+            red_pieces == blue_pieces || red_pieces == blue_pieces + 1,
+            "Should only ever differ by one"
+        );
+        if red_pieces == blue_pieces {
+            Piece::Red
+        } else {
+            Piece::Blue
+        }
     }
 
     pub fn num_pieces_played(&self) -> usize {
-        self.pieces_played
+        let mut pieces_played = 0;
+        for column in 0..COLUMNS {
+            let height = self.column_height(column);
+            pieces_played += height;
+        }
+        pieces_played
     }
 
     pub fn valid_moves(&self) -> Vec<usize> {
         let mut moves = Vec::with_capacity(COLUMNS);
-        for col in 0..COLUMNS {
-            if self.state[0][col] == Piece::Empty {
-                moves.push(col);
+        for column in 0..COLUMNS {
+            if self.column_height(column) < ROWS - 1 {
+                moves.push(column);
             }
         }
         moves
@@ -207,7 +349,7 @@ impl Board {
 
     #[allow(unused)]
     pub fn next_states(&self) -> Vec<Self> {
-        self.all_future_boards(self.next_player)
+        self.all_future_boards(self.next_player())
     }
 
     pub fn all_future_boards(&self, piece: Piece) -> Vec<Self> {
@@ -240,16 +382,12 @@ impl Board {
         assert!(self.has_winner().is_none());
 
         let mut count = 0;
+        let repr = self.to_array();
 
         // Check horizontal opportunities
-        for row in 0..ROWS {
+        for row in repr.into_iter() {
             for col in 0..COLUMNS - 3 {
-                let positions = [
-                    self.state[row][col],
-                    self.state[row][col + 1],
-                    self.state[row][col + 2],
-                    self.state[row][col + 3],
-                ];
+                let positions = [row[col], row[col + 1], row[col + 2], row[col + 3]];
                 if self.is_winning_opportunity(&positions, piece) {
                     count += 1;
                 }
@@ -260,10 +398,10 @@ impl Board {
         for row in 0..ROWS - 3 {
             for col in 0..COLUMNS {
                 let positions = [
-                    self.state[row][col],
-                    self.state[row + 1][col],
-                    self.state[row + 2][col],
-                    self.state[row + 3][col],
+                    repr[row][col],
+                    repr[row + 1][col],
+                    repr[row + 2][col],
+                    repr[row + 3][col],
                 ];
                 if self.is_winning_opportunity(&positions, piece) {
                     count += 1;
@@ -275,10 +413,10 @@ impl Board {
         for row in 3..ROWS {
             for col in 0..COLUMNS - 3 {
                 let positions = [
-                    self.state[row][col],
-                    self.state[row - 1][col + 1],
-                    self.state[row - 2][col + 2],
-                    self.state[row - 3][col + 3],
+                    repr[row][col],
+                    repr[row - 1][col + 1],
+                    repr[row - 2][col + 2],
+                    repr[row - 3][col + 3],
                 ];
                 if self.is_winning_opportunity(&positions, piece) {
                     count += 1;
@@ -290,10 +428,10 @@ impl Board {
         for row in 0..ROWS - 3 {
             for col in 0..COLUMNS - 3 {
                 let positions = [
-                    self.state[row][col],
-                    self.state[row + 1][col + 1],
-                    self.state[row + 2][col + 2],
-                    self.state[row + 3][col + 3],
+                    repr[row][col],
+                    repr[row + 1][col + 1],
+                    repr[row + 2][col + 2],
+                    repr[row + 3][col + 3],
                 ];
                 if self.is_winning_opportunity(&positions, piece) {
                     count += 1;
@@ -305,7 +443,8 @@ impl Board {
     }
 
     fn check_rows(&self) -> Option<Piece> {
-        for row in &self.state {
+        let repr = self.to_array();
+        for row in &repr {
             if let Some(winner) = self.check_line_in_array(row) {
                 return Some(winner);
             }
@@ -314,13 +453,14 @@ impl Board {
     }
 
     fn check_columns(&self) -> Option<Piece> {
+        let repr = self.to_array();
         for col in 0..COLUMNS {
             for row in 0..ROWS - 3 {
                 let pieces = [
-                    self.state[row][col],
-                    self.state[row + 1][col],
-                    self.state[row + 2][col],
-                    self.state[row + 3][col],
+                    repr[row][col],
+                    repr[row + 1][col],
+                    repr[row + 2][col],
+                    repr[row + 3][col],
                 ];
                 if let Some(winner) = self.check_four_pieces(&pieces) {
                     return Some(winner);
@@ -331,14 +471,15 @@ impl Board {
     }
 
     fn check_diagonals(&self) -> Option<Piece> {
+        let repr = self.to_array();
         // Positive slope diagonals (bottom-left to top-right)
         for row in 3..ROWS {
             for col in 0..COLUMNS - 3 {
                 let pieces = [
-                    self.state[row][col],
-                    self.state[row - 1][col + 1],
-                    self.state[row - 2][col + 2],
-                    self.state[row - 3][col + 3],
+                    repr[row][col],
+                    repr[row - 1][col + 1],
+                    repr[row - 2][col + 2],
+                    repr[row - 3][col + 3],
                 ];
                 if let Some(winner) = self.check_four_pieces(&pieces) {
                     return Some(winner);
@@ -350,10 +491,10 @@ impl Board {
         for row in 0..ROWS - 3 {
             for col in 0..COLUMNS - 3 {
                 let pieces = [
-                    self.state[row][col],
-                    self.state[row + 1][col + 1],
-                    self.state[row + 2][col + 2],
-                    self.state[row + 3][col + 3],
+                    repr[row][col],
+                    repr[row + 1][col + 1],
+                    repr[row + 2][col + 2],
+                    repr[row + 3][col + 3],
                 ];
                 if let Some(winner) = self.check_four_pieces(&pieces) {
                     return Some(winner);
@@ -411,21 +552,16 @@ impl fmt::Display for Piece {
 
 impl fmt::Display for Board {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for y in 0..ROWS {
-            for col in &self.state[y] {
+        let repr = self.to_array();
+        for (idx, row) in repr.into_iter().enumerate() {
+            for col in row {
                 write!(f, "{} ", col)?;
             }
-            if y != ROWS - 1 {
+            if idx != ROWS - 1 {
                 writeln!(f)?;
             }
         }
         Ok(())
-        // match self.has_winner() {
-        //     Some(Piece::Red) => write!(f, "Red wins!"),
-        //     Some(Piece::Blue) => write!(f, "Blue wins!"),
-        //     Some(Piece::Empty) => unreachable!("Empty piece cannot win"),
-        //     None => write!(f, "No winner yet"),
-        // }
     }
 }
 
@@ -457,6 +593,31 @@ mod tests {
         board1.with_place(2, Piece::Red);
         board2.with_place(1, Piece::Blue);
         assert_eq!(board1, board2);
+    }
+
+    #[test]
+    fn to_from_array() {
+        let mut board = Board::new();
+        assert_eq!(Board::from_array(board.to_array()), board);
+
+        board.with_place(0, Piece::Red);
+        board.with_place(1, Piece::Blue);
+        board.with_place(2, Piece::Red);
+        assert_eq!(Board::from_array(board.to_array()), board);
+
+        board.with_place(0, Piece::Blue);
+        board.with_place(1, Piece::Red);
+        board.with_place(2, Piece::Blue);
+        assert_eq!(Board::from_array(board.to_array()), board);
+
+        board.with_place(0, Piece::Blue);
+        board.with_place(6, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        board.with_place(6, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        board.with_place(6, Piece::Red);
+        assert!(board.is_terminal());
+        assert_eq!(Board::from_array(board.to_array()), board);
     }
 
     #[test]

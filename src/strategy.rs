@@ -353,9 +353,14 @@ mod tests {
 
     #[test]
     fn search_for_win() {
+        // [ ] [ ] [ ] [R] [B] [ ] [ ]
+        // [ ] [ ] [ ] [B] [R] [ ] [ ]
+        // [ ] [B] [R] [B] [B] [ ] [ ]
+        // [ ] [R] [B] [B] [B] [ ] [ ]
+        // [ ] [R] [R] [R] [B] [ ] [ ]
+        // [B] [R] [R] [B] [R] [ ] [R]
         let board = "!   RB/   BR/ BRBB/ RBBB/ RRRB/BRRBR R";
         let board = Board::from(board);
-        dbg!(board);
         let strategy = SearchForWin::new(Piece::Red, 1);
         let options = board.valid_moves();
         let choice = strategy.choose(&board, &options);

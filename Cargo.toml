@@ -1,6 +1,6 @@
 [package]
 name = "connect4"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 
 [dependencies]
@@ -18,3 +18,7 @@ criterion = { version = "0.7.0", features = ["html_reports"] }
 [[bench]]
 name = "board_bench"
 harness = false
+
+[profile.release]
+lto = true           # Link-time optimization
+codegen-units = 1    # Better optimization, slower compile
