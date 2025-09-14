@@ -150,15 +150,6 @@ impl Board {
             .or_else(|| self.check_diagonals())
     }
 
-    pub fn winning_opportunity(&self, piece: Piece) -> Option<usize> {
-        for col in self.valid_moves() {
-            let board = self.place(col, piece);
-            if board.has_winner() == Some(piece) {
-                return Some(col);
-            }
-        }
-        None
-    }
     pub fn all_future_boards(&self, piece: Piece) -> Vec<Self> {
         self.valid_moves()
             .into_iter()

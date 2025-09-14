@@ -33,10 +33,16 @@ impl StrategyStack {
                 }
                 Strategy::Decision(strategy_decider) => {
                     if let Some(choice) = strategy_decider.choose(board, &options) {
+                        assert!(options.contains(&choice));
                         // Short circuit!
                         return vec![choice];
                     }
                 }
+            }
+            // If we're ever at the point where there's only a single option left,
+            // return it instantly.
+            if options.len() == 1 {
+                return options;
             }
         }
 

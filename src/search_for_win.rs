@@ -41,12 +41,11 @@ impl SearchForWinCache {
     }
 
     /// Same scemantics as the other SearchForWin
-    fn has_guaranteed_win(&self, prior: &Board, depth: usize, move_to_test: usize) -> Option<bool> {
+    fn has_guaranteed_win(&self, board: &Board, depth: usize) -> Option<bool> {
         // This searches vertically... it might be faster to search horizontally
         // todo:: consider using a stack here instead and get rid of recursion
 
-        assert!(prior.next_player() == self.piece); // make sure I don't fuck it up
-        let board = prior.place(move_to_test, self.piece);
+        assert!(board.next_player() == self.piece.opponent()); // make sure I don't fuck it up
 
         // ------------------------------------------------------------
         // For these two, I'm guessing that they're
@@ -68,7 +67,7 @@ impl SearchForWinCache {
         // Here's where the magic is:
 
         // First, the cache lookup
-        if let Some(entry) = self.cache.borrow().get(&board) {
+        if let Some(entry) = self.cache.borrow().get(board) {
             self.stats.borrow_mut().hits += 1;
             // Ok, first let's check if we found a solution:
             if entry.forced_win == Some(true) {
@@ -99,15 +98,15 @@ impl SearchForWinCache {
             if enemy_board.has_winner() == Some(self.piece.opponent()) {
                 return Some(false);
             }
-            let responses = enemy_board.valid_moves();
+            let responses = enemy_board.all_future_boards(self.piece);
             let mut found_winning_response = false;
-            for col in responses {
-                let res = self.has_guaranteed_win(&enemy_board, depth - 1, col);
+            for response_board in responses {
+                let res = self.has_guaranteed_win(&response_board, depth - 1);
                 // If we hit the search depth at any point, we need to abort.
                 if res.is_none() {
                     // Let's cache that we couldn't quite find it.
                     let old = self.cache.borrow_mut().insert(
-                        board,
+                        *board,
                         SearchForWinCacheEntry {
                             depth_searched_at: depth,
                             forced_win: None,
@@ -131,7 +130,7 @@ impl SearchForWinCache {
             if !found_winning_response {
                 // Cache this value as well.
                 self.cache.borrow_mut().insert(
-                    board,
+                    *board,
                     SearchForWinCacheEntry {
                         depth_searched_at: 0, // The depth doesn't matter here, we know the opponent has a way out.
                         forced_win: Some(false),
@@ -147,7 +146,7 @@ impl SearchForWinCache {
         // This means we 100% win in the next `depth` moves if we play `move_to_test`.
         // Cache that and return.
         self.cache.borrow_mut().insert(
-            board,
+            *board,
             SearchForWinCacheEntry {
                 depth_searched_at: 0, // The depth doesn't matter here, we know we're winning and don't care how long it takes.
                 forced_win: Some(true),
@@ -161,7 +160,8 @@ impl SearchForWinCache {
 impl StrategyDecider for SearchForWinCache {
     fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
         for col in options {
-            if self.has_guaranteed_win(board, self.depth, *col) == Some(true) {
+            let board = &board.place(*col, self.piece);
+            if self.has_guaranteed_win(board, self.depth) == Some(true) {
                 return Some(*col);
             }
         }
