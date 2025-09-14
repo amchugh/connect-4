@@ -11,3 +11,4 @@
 # Release binaries
 /releases/
 release.sh
+connect4-macos-arm64
