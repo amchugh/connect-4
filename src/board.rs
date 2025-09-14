@@ -7,7 +7,7 @@ pub const COLUMNS: usize = 7;
 pub enum Piece {
     Empty,
     Red,
-    Blue,
+    Yellow,
 }
 
 impl Piece {
@@ -15,8 +15,8 @@ impl Piece {
     pub fn opponent(&self) -> Piece {
         match self {
             Piece::Empty => panic!("Cannot get opponent of empty piece"),
-            Piece::Red => Piece::Blue,
-            Piece::Blue => Piece::Red,
+            Piece::Red => Piece::Yellow,
+            Piece::Yellow => Piece::Red,
         }
     }
 
@@ -24,7 +24,7 @@ impl Piece {
     pub fn name(&self) -> &'static str {
         match self {
             Piece::Red => "Red",
-            Piece::Blue => "Blue",
+            Piece::Yellow => "Yellow",
             Piece::Empty => panic!("Why are we trying to get the color of Empty?"),
         }
     }
@@ -87,9 +87,9 @@ impl Board {
                         // Don't need to do anything as they are by-default red.
                         debug_assert!(board.get_raw(column, row) == Piece::Red, "{board}");
                     }
-                    Piece::Blue => {
-                        // Need to set that piece blue
-                        board.set_blue(column, row);
+                    Piece::Yellow => {
+                        // Need to set that piece yellow
+                        board.set_yellow(column, row);
                     }
                 }
                 height += 1;
@@ -132,7 +132,7 @@ impl Board {
         let value = self.0 >> ((column * 9) + row + COLUMN_HEIGHT_OFFSET);
         match value & 0b1 {
             0 => Piece::Red,
-            1 => Piece::Blue,
+            1 => Piece::Yellow,
             // Obviously this value can only be 0 or 1.
             _ => unsafe { unreachable_unchecked() },
         }
@@ -181,8 +181,8 @@ impl Board {
                     'R' => {
                         board_array[row][col] = Piece::Red;
                     }
-                    'B' => {
-                        board_array[row][col] = Piece::Blue;
+                    'B' | 'Y' => {
+                        board_array[row][col] = Piece::Yellow;
                     }
                     _ => panic!("Invalid character"),
                 }
@@ -193,17 +193,17 @@ impl Board {
         #[cfg(debug_assertions)]
         {
             let mut red_played = 0;
-            let mut blue_played = 0;
+            let mut yellow_played = 0;
             for row in board_array {
                 for piece in row {
                     match piece {
                         Piece::Red => red_played += 1,
-                        Piece::Blue => blue_played += 1,
+                        Piece::Yellow => yellow_played += 1,
                         _ => {}
                     }
                 }
             }
-            debug_assert!(red_played == blue_played || red_played == blue_played + 1);
+            debug_assert!(red_played == yellow_played || red_played == yellow_played + 1);
         }
 
         Board::from_array(board_array)
@@ -227,7 +227,7 @@ impl Board {
                         }
                         s.push('R');
                     }
-                    Piece::Blue => {
+                    Piece::Yellow => {
                         if leading_spaces > 0 {
                             for _ in 0..leading_spaces {
                                 s.push(' ');
@@ -246,7 +246,7 @@ impl Board {
     }
 
     #[inline]
-    fn set_blue(&mut self, column: usize, height: usize) {
+    fn set_yellow(&mut self, column: usize, height: usize) {
         debug_assert!(column < COLUMNS, "Column must be on the board");
         debug_assert!(height < ROWS, "Cannot overfill a column");
 
@@ -286,8 +286,8 @@ impl Board {
                 // We need to set this to a 0... but by definition it should be 0 already.
                 debug_assert!(self.get_raw(column, height) == Piece::Red);
             }
-            Piece::Blue => {
-                self.set_blue(column, height);
+            Piece::Yellow => {
+                self.set_yellow(column, height);
             }
             Piece::Empty => unreachable!(),
         }
@@ -302,7 +302,7 @@ impl Board {
     pub fn next_player(&self) -> Piece {
         // This is a bit expensive to calculate...
         let mut red_pieces = 0;
-        let mut blue_pieces = 0;
+        let mut yellow_pieces = 0;
         for column in 0..COLUMNS {
             let height = self.column_height(column);
             if height == 0 {
@@ -311,17 +311,17 @@ impl Board {
             let column_data_mask = 0b111111 >> (6 - height);
             let column_data = (self.0 >> (3 + column * 9)) & column_data_mask;
             let ones = column_data.count_ones();
-            blue_pieces += ones;
+            yellow_pieces += ones;
             red_pieces += (height as u32) - ones;
         }
         assert!(
-            red_pieces == blue_pieces || red_pieces == blue_pieces + 1,
+            red_pieces == yellow_pieces || red_pieces == yellow_pieces + 1,
             "Should only ever differ by one"
         );
-        if red_pieces == blue_pieces {
+        if red_pieces == yellow_pieces {
             Piece::Red
         } else {
-            Piece::Blue
+            Piece::Yellow
         }
     }
 
@@ -602,7 +602,7 @@ impl fmt::Display for Piece {
         match self {
             Piece::Empty => write!(f, "{}", "[ ]".black()),
             Piece::Red => write!(f, "{}", "[R]".b_redb()),
-            Piece::Blue => write!(f, "{}", "[B]".b_blueb()),
+            Piece::Yellow => write!(f, "{}", "[Y]".b_blackb().b_yellow()),
         }
     }
 }
@@ -642,13 +642,13 @@ mod tests {
         board2.with_place(0, Piece::Red);
         assert_eq!(board1, board2);
 
-        board1.with_place(1, Piece::Blue);
+        board1.with_place(1, Piece::Yellow);
         board2.with_place(2, Piece::Red);
         assert_ne!(board1, board2);
 
         // Order doesn't matter
         board1.with_place(2, Piece::Red);
-        board2.with_place(1, Piece::Blue);
+        board2.with_place(1, Piece::Yellow);
         assert_eq!(board1, board2);
     }
 
@@ -658,20 +658,20 @@ mod tests {
         assert_eq!(Board::from_array(board.to_array()), board);
 
         board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Blue);
+        board.with_place(1, Piece::Yellow);
         board.with_place(2, Piece::Red);
         assert_eq!(Board::from_array(board.to_array()), board);
 
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Blue);
+        board.with_place(2, Piece::Yellow);
         assert_eq!(Board::from_array(board.to_array()), board);
 
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(6, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(6, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(6, Piece::Red);
         println!("{}", board);
         assert!(board.is_terminal());
@@ -682,7 +682,7 @@ mod tests {
     fn test_count_winning_opportunities_empty_board() {
         let board = Board::new();
         assert_eq!(board.count_winning_opportunities(Piece::Red), 0);
-        assert_eq!(board.count_winning_opportunities(Piece::Blue), 0);
+        assert_eq!(board.count_winning_opportunities(Piece::Yellow), 0);
     }
 
     #[test]
@@ -695,7 +695,7 @@ mod tests {
 
         // Should have 1 winning opportunity (can complete at column 3)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
-        assert_eq!(board.count_winning_opportunities(Piece::Blue), 0);
+        assert_eq!(board.count_winning_opportunities(Piece::Yellow), 0);
     }
 
     #[test]
@@ -708,7 +708,7 @@ mod tests {
 
         // Should have 1 winning opportunity (can complete at column 2)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
-        assert_eq!(board.count_winning_opportunities(Piece::Blue), 0);
+        assert_eq!(board.count_winning_opportunities(Piece::Yellow), 0);
     }
 
     #[test]
@@ -722,7 +722,7 @@ mod tests {
         // This creates two overlapping opportunities:
         // _RRR (positions 0-3) and RRR_ (positions 1-4)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 2);
-        assert_eq!(board.count_winning_opportunities(Piece::Blue), 0);
+        assert_eq!(board.count_winning_opportunities(Piece::Yellow), 0);
     }
 
     #[test]
@@ -735,7 +735,7 @@ mod tests {
 
         // Should have 1 winning opportunity (can complete by placing on top)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
-        assert_eq!(board.count_winning_opportunities(Piece::Blue), 0);
+        assert_eq!(board.count_winning_opportunities(Piece::Yellow), 0);
     }
 
     #[test]
@@ -745,11 +745,11 @@ mod tests {
         // Place pieces to build up the diagonal
         board.with_place(0, Piece::Red); // Bottom of column 0
 
-        board.with_place(1, Piece::Blue); // Bottom of column 1
+        board.with_place(1, Piece::Yellow); // Bottom of column 1
         board.with_place(1, Piece::Red); // Second level of column 1
 
-        board.with_place(2, Piece::Blue); // Bottom of column 2
-        board.with_place(2, Piece::Blue); // Second level of column 2
+        board.with_place(2, Piece::Yellow); // Bottom of column 2
+        board.with_place(2, Piece::Yellow); // Second level of column 2
         board.with_place(2, Piece::Red); // Third level of column 2
 
         // Now we have a diagonal RRR_ pattern, missing the top-right piece
@@ -764,18 +764,18 @@ mod tests {
         // We need to build up the columns to the right heights
 
         // Column 0: need red at row 2 (third from top)
-        board.with_place(0, Piece::Blue); // Row 5 (bottom)
-        board.with_place(0, Piece::Blue); // Row 4
-        board.with_place(0, Piece::Blue); // Row 3
+        board.with_place(0, Piece::Yellow); // Row 5 (bottom)
+        board.with_place(0, Piece::Yellow); // Row 4
+        board.with_place(0, Piece::Yellow); // Row 3
         board.with_place(0, Piece::Red); // Row 2
 
         // Column 1: need red at row 3
-        board.with_place(1, Piece::Blue); // Row 5
-        board.with_place(1, Piece::Blue); // Row 4
+        board.with_place(1, Piece::Yellow); // Row 5
+        board.with_place(1, Piece::Yellow); // Row 4
         board.with_place(1, Piece::Red); // Row 3
 
         // Column 2: need red at row 4
-        board.with_place(2, Piece::Blue); // Row 5
+        board.with_place(2, Piece::Yellow); // Row 5
         board.with_place(2, Piece::Red); // Row 4
 
         // Column 3: needs to be empty at row 5 for the opportunity
@@ -792,11 +792,11 @@ mod tests {
         board.with_place(0, Piece::Red);
         board.with_place(1, Piece::Red);
         board.with_place(2, Piece::Red);
-        board.with_place(3, Piece::Blue); // Block the winning opportunity
+        board.with_place(3, Piece::Yellow); // Block the winning opportunity
 
         // Should have 0 winning opportunities because opponent piece blocks
         assert_eq!(board.count_winning_opportunities(Piece::Red), 0);
-        assert_eq!(board.count_winning_opportunities(Piece::Blue), 0);
+        assert_eq!(board.count_winning_opportunities(Piece::Yellow), 0);
     }
 
     #[test]
@@ -833,11 +833,11 @@ mod tests {
     fn fill_column_with_pieces() {
         let mut board = Board::new();
         board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
     }
 
     #[test]
@@ -845,11 +845,11 @@ mod tests {
     fn fill_column_with_pieces_correct_bounds_check() {
         let mut board = Board::new();
         board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Yellow);
         // Should crash on the next line
         board.with_place(0, Piece::Red);
     }

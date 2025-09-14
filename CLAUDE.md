@@ -58,7 +58,7 @@ cargo clippy
 - `Setup<S>` - looks ahead two moves to create winning setups
 
 **Game Loop (`game` function):**
-- Alternates between red and blue players
+- Alternates between red and yellow players
 - Handles win detection and game termination
 - Returns final board state
 

@@ -43,10 +43,10 @@ struct Cli {
     use_cache: bool,
 }
 
-fn game(red: &dyn Connect4AI, blue: &dyn Connect4AI) -> Option<Board> {
+fn game(red: &dyn Connect4AI, yellow: &dyn Connect4AI) -> Option<Board> {
     let mut board = Board::new();
     loop {
-        // Red plays, then blue.
+        // Red plays, then yellow.
         // If there's a winner or no moves left, leave
         if board.has_winner().is_some() || board.valid_moves().is_empty() {
             break;
@@ -57,22 +57,22 @@ fn game(red: &dyn Connect4AI, blue: &dyn Connect4AI) -> Option<Board> {
         if board.has_winner().is_some() || board.valid_moves().is_empty() {
             break;
         }
-        let col = blue.play(&board)?;
-        board.with_place(col, Piece::Blue);
+        let col = yellow.play(&board)?;
+        board.with_place(col, Piece::Yellow);
     }
     Some(board)
 }
 
 fn simulate_games(
     red: &dyn Connect4AI,
-    blue: &dyn Connect4AI,
+    yellow: &dyn Connect4AI,
     games: usize,
 ) -> Result<(usize, usize, usize)> {
     let mut red_wins = 0;
-    let mut blue_wins = 0;
+    let mut yellow_wins = 0;
     let mut ties = 0;
 
-    println!("Running with strategies:\nRed:  {red}\nBlue: {blue}",);
+    println!("Running with strategies:\nRed:    {red}\nYellow: {yellow}",);
 
     let pb = ProgressBar::new(games as u64);
     pb.set_style(
@@ -84,11 +84,11 @@ fn simulate_games(
     pb.set_message("Simulating games...");
 
     for _ in 0..games {
-        let result = game(red, blue).unwrap();
+        let result = game(red, yellow).unwrap();
 
         match result.has_winner() {
             Some(Piece::Red) => red_wins += 1,
-            Some(Piece::Blue) => blue_wins += 1,
+            Some(Piece::Yellow) => yellow_wins += 1,
             Some(_) => panic!("Unexpected winner"),
             None => ties += 1,
         }
@@ -97,7 +97,7 @@ fn simulate_games(
     }
     pb.finish_and_clear();
 
-    Ok((red_wins, blue_wins, ties))
+    Ok((red_wins, yellow_wins, ties))
 }
 
 fn play_interactive() -> Result<()> {
@@ -115,7 +115,7 @@ fn play_interactive() -> Result<()> {
     let mut term = console::Term::stdout();
     let mut board = Board::new();
     let mut selection = COLUMNS / 2;
-    let ai = build_strategy_stack(Piece::Blue, &term)?;
+    let ai = build_strategy_stack(Piece::Yellow, &term)?;
 
     // Get a move
     // Get the AI response
@@ -179,9 +179,11 @@ fn play_interactive() -> Result<()> {
                 Piece::Red => {
                     writeln!(term, "Red wins after {} moves.", board.num_pieces_played())?
                 }
-                Piece::Blue => {
-                    writeln!(term, "Blue wins after {} moves.", board.num_pieces_played())?
-                }
+                Piece::Yellow => writeln!(
+                    term,
+                    "Yellow wins after {} moves.",
+                    board.num_pieces_played()
+                )?,
                 Piece::Empty => unreachable!(),
             }
             term.show_cursor()?;
@@ -198,7 +200,7 @@ fn play_interactive() -> Result<()> {
         thread::sleep(Duration::from_millis(500));
         // Make the AI move
         let ai_move = ai.play(&board).context("Failed to get AI move");
-        board.with_place(ai_move?, Piece::Blue);
+        board.with_place(ai_move?, Piece::Yellow);
 
         // Update the board display
         term.clear_line()?;
@@ -211,9 +213,11 @@ fn play_interactive() -> Result<()> {
                 Piece::Red => {
                     writeln!(term, "Red wins after {} moves.", board.num_pieces_played())?
                 }
-                Piece::Blue => {
-                    writeln!(term, "Blue wins after {} moves.", board.num_pieces_played())?
-                }
+                Piece::Yellow => writeln!(
+                    term,
+                    "Yellow wins after {} moves.",
+                    board.num_pieces_played()
+                )?,
                 Piece::Empty => unreachable!(),
             }
             term.show_cursor()?;
@@ -300,15 +304,16 @@ fn run_simulation(iterations: usize, use_cache: bool) -> Result<()> {
     let term = console::Term::stdout();
 
     if use_cache {
-        // Let's use caching for red and blue strategies so they run faster!
+        // Let's use caching for red and yellow strategies so they run faster!
         let red = Box::new(StrategyCache::new(build_strategy_stack(Piece::Red, &term)?));
-        let blue = Box::new(StrategyCache::new(build_strategy_stack(
-            Piece::Blue,
+        let yellow = Box::new(StrategyCache::new(build_strategy_stack(
+            Piece::Yellow,
             &term,
         )?));
 
         let start = Instant::now();
-        let (red_wins, blue_wins, ties) = simulate_games(red.as_ref(), blue.as_ref(), iterations)?;
+        let (red_wins, yellow_wins, ties) =
+            simulate_games(red.as_ref(), yellow.as_ref(), iterations)?;
         let duration = start.elapsed();
 
         println!(
@@ -322,25 +327,26 @@ fn run_simulation(iterations: usize, use_cache: bool) -> Result<()> {
             red_wins as f64 / iterations as f64 * 100.0
         );
         println!(
-            "Blue wins: {:.2}%",
-            blue_wins as f64 / iterations as f64 * 100.0
+            "Yellow wins: {:.2}%",
+            yellow_wins as f64 / iterations as f64 * 100.0
         );
         println!("Ties:      {:.2}%", ties as f64 / iterations as f64 * 100.0);
 
         let red_cache_stats = red.cache_stats();
-        let blue_cache_stats = blue.cache_stats();
+        let yellow_cache_stats = yellow.cache_stats();
 
         println!("Red cache:{}", &red_cache_stats);
-        println!("Blue cache:{}", &blue_cache_stats);
+        println!("Yellow cache:{}", &yellow_cache_stats);
 
-        let cache_stats = red_cache_stats + blue_cache_stats;
+        let cache_stats = red_cache_stats + yellow_cache_stats;
         println!("Overall cache stats:{}", &cache_stats);
     } else {
         let red = Box::new(build_strategy_stack(Piece::Red, &term)?);
-        let blue = Box::new(build_strategy_stack(Piece::Blue, &term)?);
+        let yellow = Box::new(build_strategy_stack(Piece::Yellow, &term)?);
 
         let start = Instant::now();
-        let (red_wins, blue_wins, ties) = simulate_games(red.as_ref(), blue.as_ref(), iterations)?;
+        let (red_wins, yellow_wins, ties) =
+            simulate_games(red.as_ref(), yellow.as_ref(), iterations)?;
         let duration = start.elapsed();
 
         println!(
@@ -354,8 +360,8 @@ fn run_simulation(iterations: usize, use_cache: bool) -> Result<()> {
             red_wins as f64 / iterations as f64 * 100.0
         );
         println!(
-            "Blue wins: {:.2}%",
-            blue_wins as f64 / iterations as f64 * 100.0
+            "Yellow wins: {:.2}%",
+            yellow_wins as f64 / iterations as f64 * 100.0
         );
         println!("Ties:      {:.2}%", ties as f64 / iterations as f64 * 100.0);
     }

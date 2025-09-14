@@ -29,7 +29,7 @@ cargo install --path .
 connect-4
 ```
 
-Use arrow keys to select a column, press Enter to drop your piece. You play as Red, AI plays as Blue.
+Use arrow keys to select a column, press Enter to drop your piece. You play as Red, AI plays as Yellow.
 
 ### AI Simulation Mode
 ```bash
