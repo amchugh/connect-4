@@ -122,8 +122,12 @@ impl Board {
         arr
     }
 
+    /// Does not check if the piece is empty or not.
     #[inline]
     fn get_raw(&self, column: usize, row: usize) -> Piece {
+        debug_assert!(column < COLUMNS, "Cannot off the top of the board");
+        debug_assert!(row < ROWS, "Cannot get outside of the board");
+
         const COLUMN_HEIGHT_OFFSET: usize = 3;
         let value = self.0 >> ((column * 9) + row + COLUMN_HEIGHT_OFFSET);
         match value & 0b1 {
@@ -134,8 +138,12 @@ impl Board {
         }
     }
 
+    /// Checks if the piece is empty. If it is not, returns the piece.
     #[inline]
     fn get_checked(&self, column: usize, row: usize) -> Piece {
+        debug_assert!(column < COLUMNS, "Cannot off the top of the board");
+        debug_assert!(row < ROWS, "Cannot get outside of the board");
+
         let height = self.column_height(column);
         if height <= row {
             Piece::Empty
@@ -276,7 +284,7 @@ impl Board {
         match piece {
             Piece::Red => {
                 // We need to set this to a 0... but by definition it should be 0 already.
-                debug_assert!(self.get_checked(column, height) == Piece::Red);
+                debug_assert!(self.get_raw(column, height) == Piece::Red);
             }
             Piece::Blue => {
                 self.set_blue(column, height);
@@ -338,7 +346,8 @@ impl Board {
 
     #[allow(unused)]
     pub fn is_terminal(&self) -> bool {
-        self.has_winner().is_some() || self.valid_moves().is_empty()
+        // If there is a winner or the board is full, the game is over
+        self.has_winner().is_some() || (0..COLUMNS).all(|col| self.column_height(col) == ROWS)
     }
 
     pub fn has_winner(&self) -> Option<Piece> {
@@ -442,25 +451,62 @@ impl Board {
         count
     }
 
+    #[inline]
     fn check_rows(&self) -> Option<Piece> {
-        let repr = self.to_array();
-        for row in &repr {
-            if let Some(winner) = self.check_line_in_array(row) {
-                return Some(winner);
+        let column_heights = [
+            self.column_height(0),
+            self.column_height(1),
+            self.column_height(2),
+            self.column_height(3),
+            self.column_height(4),
+            self.column_height(5),
+            self.column_height(6),
+        ];
+        debug_assert!(column_heights.len() == COLUMNS);
+
+        let tallest = column_heights
+            .iter()
+            .fold(COLUMNS - 3, |acc, &height| acc.min(height));
+
+        for row in 0..ROWS {
+            for column in 0..tallest {
+                if column_heights[column] <= row
+                    || column_heights[column + 1] <= row
+                    || column_heights[column + 2] <= row
+                    || column_heights[column + 3] <= row
+                {
+                    continue;
+                }
+                let pieces = [
+                    self.get_raw(column, row),
+                    self.get_raw(column + 1, row),
+                    self.get_raw(column + 2, row),
+                    self.get_raw(column + 3, row),
+                ];
+                if let Some(winner) = self.check_four_pieces(&pieces) {
+                    return Some(winner);
+                }
             }
         }
         None
     }
 
+    #[inline]
     fn check_columns(&self) -> Option<Piece> {
-        let repr = self.to_array();
-        for col in 0..COLUMNS {
-            for row in 0..ROWS - 3 {
+        for column in 0..COLUMNS {
+            let height = self.column_height(column);
+            if height < 4 {
+                // No way anyone can win in the column if it's too short
+                continue;
+            }
+            for row in 0..height - 3 {
+                // We know that the column is at least 4 pieces high,
+                // so we can safely get the raw data.
                 let pieces = [
-                    repr[row][col],
-                    repr[row + 1][col],
-                    repr[row + 2][col],
-                    repr[row + 3][col],
+                    self.get_raw(column, row),
+                    self.get_raw(column, row + 1),
+                    self.get_raw(column, row + 2),
+                    self.get_raw(column, row + 3),
                 ];
                 if let Some(winner) = self.check_four_pieces(&pieces) {
                     return Some(winner);
@@ -471,30 +517,54 @@ impl Board {
     }
 
     fn check_diagonals(&self) -> Option<Piece> {
-        let repr = self.to_array();
-        // Positive slope diagonals (bottom-left to top-right)
-        for row in 3..ROWS {
-            for col in 0..COLUMNS - 3 {
+        let column_heights = [
+            self.column_height(0),
+            self.column_height(1),
+            self.column_height(2),
+            self.column_height(3),
+            self.column_height(4),
+            self.column_height(5),
+            self.column_height(6),
+        ];
+        debug_assert!(column_heights.len() == COLUMNS);
+
+        for column in 0..COLUMNS - 3 {
+            // Positive slope diagonals (bottom-left to top-right)
+            for row in 3..ROWS {
+                // This makes the code more readable, actually.
+                #[allow(clippy::int_plus_one)]
+                // Skip if any columns are too short. This lets us call get_raw.
+                if column_heights[column] <= row
+                    || column_heights[column + 1] <= row - 1
+                    || column_heights[column + 2] <= row - 2
+                    || column_heights[column + 3] <= row - 3
+                {
+                    continue;
+                }
                 let pieces = [
-                    repr[row][col],
-                    repr[row - 1][col + 1],
-                    repr[row - 2][col + 2],
-                    repr[row - 3][col + 3],
+                    self.get_raw(column, row),
+                    self.get_raw(column + 1, row - 1),
+                    self.get_raw(column + 2, row - 2),
+                    self.get_raw(column + 3, row - 3),
                 ];
                 if let Some(winner) = self.check_four_pieces(&pieces) {
                     return Some(winner);
                 }
             }
-        }
-
-        // Negative slope diagonals (top-left to bottom-right)
-        for row in 0..ROWS - 3 {
-            for col in 0..COLUMNS - 3 {
+            // Negative slope diagonals (top-left to bottom-right)
+            for row in 0..ROWS - 3 {
+                if column_heights[column] <= row
+                    || column_heights[column + 1] <= row + 1
+                    || column_heights[column + 2] <= row + 2
+                    || column_heights[column + 3] <= row + 3
+                {
+                    continue;
+                }
                 let pieces = [
-                    repr[row][col],
-                    repr[row + 1][col + 1],
-                    repr[row + 2][col + 2],
-                    repr[row + 3][col + 3],
+                    self.get_raw(column, row),
+                    self.get_raw(column + 1, row + 1),
+                    self.get_raw(column + 2, row + 2),
+                    self.get_raw(column + 3, row + 3),
                 ];
                 if let Some(winner) = self.check_four_pieces(&pieces) {
                     return Some(winner);
@@ -505,16 +575,7 @@ impl Board {
         None
     }
 
-    fn check_line_in_array(&self, row: &[Piece; COLUMNS]) -> Option<Piece> {
-        for col in 0..COLUMNS - 3 {
-            let pieces = [row[col], row[col + 1], row[col + 2], row[col + 3]];
-            if let Some(winner) = self.check_four_pieces(&pieces) {
-                return Some(winner);
-            }
-        }
-        None
-    }
-
+    #[inline(always)]
     fn check_four_pieces(&self, pieces: &[Piece; 4]) -> Option<Piece> {
         if pieces[0] != Piece::Empty
             && pieces[0] == pieces[1]
@@ -616,6 +677,7 @@ mod tests {
         board.with_place(6, Piece::Red);
         board.with_place(0, Piece::Blue);
         board.with_place(6, Piece::Red);
+        println!("{}", board);
         assert!(board.is_terminal());
         assert_eq!(Board::from_array(board.to_array()), board);
     }
