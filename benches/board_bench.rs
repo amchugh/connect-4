@@ -1,13 +1,14 @@
 use connect4::Board;
 use criterion::{Criterion, criterion_group, criterion_main};
 
-const TEST_BOARDS: [&str; 6] = [
+const TEST_BOARDS: [&str; 7] = [
     "!////RR B/BB R",
     "!///  RB/ RRR/ BBBR",
     "!///   B/  RRR/B BRB",
     "!/B  BB/R  RR/B BBR/B RRR R/B BRB R",
     "!B BRB R/B RBB R/R BRR B/B BBR R/B RRR R/B BRB R",
     "!B BRB R/B RBB R/R BRR B/BRBBR R/BBRRR R/BRBRB R",
+    "!/////",
 ];
 
 fn bench_basic_operations(c: &mut Criterion) {
@@ -57,6 +58,7 @@ fn bench_basic_operations(c: &mut Criterion) {
             Some((board, board.valid_moves(), board.next_player()))
         })
         .collect();
+
     c.bench_function("place piece", |b| {
         b.iter(|| {
             for (board, moves, piece) in &moves {
@@ -66,18 +68,20 @@ fn bench_basic_operations(c: &mut Criterion) {
             }
         })
     });
-
-    // let board = Board::new();
-
-    // Place 20 random pieces
-    // Make sure that these are going to be a valid 20 random pieces
-    // for _ in 0..20 {
-    //     let (row, col) = board.random_empty_cell();
-    //     board.place(row, col, black_box(1));
-    // }
-    // c.bench_function("place", f)
 }
 
-criterion_group!(benches, bench_basic_operations);
+fn board_graph_opertaions(c: &mut Criterion) {
+    let boards: Vec<Board> = TEST_BOARDS.into_iter().map(Board::from).collect();
+
+    c.bench_function("prior states", |b| {
+        b.iter(|| {
+            for board in &boards {
+                board.prior_states();
+            }
+        })
+    });
+}
+
+criterion_group!(benches, bench_basic_operations, board_graph_opertaions);
 
 criterion_main!(benches);

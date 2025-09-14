@@ -52,13 +52,13 @@ fn game(red: &dyn Connect4AI, yellow: &dyn Connect4AI) -> Option<Board> {
             break;
         }
         let col = red.play(&board)?;
-        board.with_place(col, Piece::Red);
+        board = board.place(col, Piece::Red);
 
         if board.has_winner().is_some() || board.valid_moves().is_empty() {
             break;
         }
         let col = yellow.play(&board)?;
-        board.with_place(col, Piece::Yellow);
+        board = board.place(col, Piece::Yellow);
     }
     Some(board)
 }
@@ -166,7 +166,7 @@ fn play_interactive() -> Result<()> {
         }
 
         // Make the move
-        board.with_place(selection, Piece::Red);
+        board = board.place(selection, Piece::Red);
 
         // Update the board display
         term.clear_line()?;
@@ -200,7 +200,7 @@ fn play_interactive() -> Result<()> {
         thread::sleep(Duration::from_millis(500));
         // Make the AI move
         let ai_move = ai.play(&board).context("Failed to get AI move");
-        board.with_place(ai_move?, Piece::Yellow);
+        board = board.place(ai_move?, Piece::Yellow);
 
         // Update the board display
         term.clear_line()?;

@@ -66,6 +66,16 @@ type BoardArray = [[Piece; COLUMNS]; ROWS];
 impl Board {
     pub const EMPTY: Board = Board(0);
 
+    // Come back to these one day
+    #[allow(dead_code)]
+    const SPECIAL_BOARD_FLAG: u64 = 0b1 << 63;
+    #[allow(dead_code)]
+    const RED_WIN: Board = Board(Board::SPECIAL_BOARD_FLAG | 0b01);
+    #[allow(dead_code)]
+    const YELLOW_WIN: Board = Board(Board::SPECIAL_BOARD_FLAG | 0b10);
+    #[allow(dead_code)]
+    const TIE: Board = Board(Board::SPECIAL_BOARD_FLAG | 0b11);
+
     #[inline]
     pub fn new() -> Self {
         Board::EMPTY
@@ -255,6 +265,17 @@ impl Board {
         self.0 |= placed_value;
     }
 
+    /// This method is only necessary if you are replacing an existing piece!
+    #[inline]
+    fn set_red(&mut self, column: usize, height: usize) {
+        debug_assert!(column < COLUMNS, "Column must be on the board");
+        debug_assert!(height < ROWS, "Cannot overfill a column");
+
+        // We need to set this to a 0.
+        let placed_value = 1 << ((column * 9) + 3 + height);
+        self.0 &= !placed_value;
+    }
+
     #[inline]
     fn set_column_height(&mut self, column: usize, height: usize) {
         debug_assert!(column < COLUMNS, "Column must be on the board");
@@ -267,7 +288,7 @@ impl Board {
     }
 
     #[inline]
-    pub fn with_place(&mut self, column: usize, piece: Piece) {
+    fn with_placed(&mut self, column: usize, piece: Piece) {
         debug_assert!(
             piece != Piece::Empty,
             "Should never try and place an empty piece"
@@ -295,7 +316,7 @@ impl Board {
 
     pub fn place(&self, column: usize, piece: Piece) -> Board {
         let mut next_state = *self;
-        next_state.with_place(column, piece);
+        next_state.with_placed(column, piece);
         next_state
     }
 
@@ -375,7 +396,7 @@ impl Board {
         let mut winning_moves = Vec::new();
         for m in self.valid_moves() {
             let mut next_board = *self;
-            next_board.with_place(m, piece);
+            next_board.with_placed(m, piece);
             if next_board.has_winner() == Some(piece) {
                 winning_moves.push(m)
             }
@@ -594,6 +615,47 @@ impl Board {
         // Must have exactly 3 of our pieces, 1 empty space, and 0 opponent pieces
         piece_count == 3 && empty_count == 1 && opponent_count == 0
     }
+
+    /// This is going to make it a lot easier to traverse this graph once I start work on it.
+    /// With this function, we can get all the previous possible states that would've produced
+    /// the current state. This should let state 100% if we can prune a state/branch from the graph.
+    #[allow(dead_code)]
+    pub fn prior_states(&self) -> Vec<Board> {
+        // An empty board has no priors.
+        if *self == Board::EMPTY {
+            return vec![];
+        }
+
+        let mut previous_states = Vec::with_capacity(6);
+
+        // We need to know who played the last move so we can unwrap it.
+        let last_mover = self.next_player().opponent();
+
+        // Now go to the top of every column and see if that player's piece is there
+        for column in 0..COLUMNS {
+            let height = self.column_height(column);
+            if height == 0 {
+                continue;
+            }
+            let top = self.get_raw(column, height - 1);
+            if top == last_mover {
+                let mut new_board = *self;
+                // We need to adjust that column height
+                new_board.set_column_height(column, height - 1);
+                // Also, if that piece was yellow, we need to set that 1 to a 0 so our invariants hold.
+                if last_mover == Piece::Yellow {
+                    new_board.set_red(column, height);
+                }
+                previous_states.push(new_board);
+            }
+        }
+
+        // If there are no priors, that implies this board is impossible.
+        // Let's assume for now that this is never called from invalid boards.
+        assert!(!previous_states.is_empty());
+
+        previous_states
+    }
 }
 
 impl fmt::Display for Piece {
@@ -638,17 +700,17 @@ mod tests {
         let mut board2 = Board::new();
         assert_eq!(board1, board2);
 
-        board1.with_place(0, Piece::Red);
-        board2.with_place(0, Piece::Red);
+        board1.with_placed(0, Piece::Red);
+        board2.with_placed(0, Piece::Red);
         assert_eq!(board1, board2);
 
-        board1.with_place(1, Piece::Yellow);
-        board2.with_place(2, Piece::Red);
+        board1.with_placed(1, Piece::Yellow);
+        board2.with_placed(2, Piece::Red);
         assert_ne!(board1, board2);
 
         // Order doesn't matter
-        board1.with_place(2, Piece::Red);
-        board2.with_place(1, Piece::Yellow);
+        board1.with_placed(2, Piece::Red);
+        board2.with_placed(1, Piece::Yellow);
         assert_eq!(board1, board2);
     }
 
@@ -657,22 +719,22 @@ mod tests {
         let mut board = Board::new();
         assert_eq!(Board::from_array(board.to_array()), board);
 
-        board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Yellow);
-        board.with_place(2, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(1, Piece::Yellow);
+        board.with_placed(2, Piece::Red);
         assert_eq!(Board::from_array(board.to_array()), board);
 
-        board.with_place(0, Piece::Yellow);
-        board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Yellow);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(2, Piece::Yellow);
         assert_eq!(Board::from_array(board.to_array()), board);
 
-        board.with_place(0, Piece::Yellow);
-        board.with_place(6, Piece::Red);
-        board.with_place(0, Piece::Yellow);
-        board.with_place(6, Piece::Red);
-        board.with_place(0, Piece::Yellow);
-        board.with_place(6, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(6, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(6, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(6, Piece::Red);
         println!("{}", board);
         assert!(board.is_terminal());
         assert_eq!(Board::from_array(board.to_array()), board);
@@ -689,9 +751,9 @@ mod tests {
     fn test_count_winning_opportunities_horizontal() {
         let mut board = Board::new();
         // Place three red pieces horizontally: RRR_
-        board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(2, Piece::Red);
 
         // Should have 1 winning opportunity (can complete at column 3)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -702,9 +764,9 @@ mod tests {
     fn test_count_winning_opportunities_horizontal_gap_in_middle() {
         let mut board = Board::new();
         // Place RR_R pattern
-        board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Red);
-        board.with_place(3, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(3, Piece::Red);
 
         // Should have 1 winning opportunity (can complete at column 2)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -715,9 +777,9 @@ mod tests {
     fn test_count_winning_opportunities_horizontal_gap_at_start() {
         let mut board = Board::new();
         // Place _RRR pattern
-        board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Red);
-        board.with_place(3, Piece::Red);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(2, Piece::Red);
+        board.with_placed(3, Piece::Red);
 
         // This creates two overlapping opportunities:
         // _RRR (positions 0-3) and RRR_ (positions 1-4)
@@ -729,9 +791,9 @@ mod tests {
     fn test_count_winning_opportunities_vertical() {
         let mut board = Board::new();
         // Place three red pieces vertically in column 0
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Red);
 
         // Should have 1 winning opportunity (can complete by placing on top)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -743,14 +805,14 @@ mod tests {
         let mut board = Board::new();
         // Create a diagonal pattern (bottom-left to top-right)
         // Place pieces to build up the diagonal
-        board.with_place(0, Piece::Red); // Bottom of column 0
+        board.with_placed(0, Piece::Red); // Bottom of column 0
 
-        board.with_place(1, Piece::Yellow); // Bottom of column 1
-        board.with_place(1, Piece::Red); // Second level of column 1
+        board.with_placed(1, Piece::Yellow); // Bottom of column 1
+        board.with_placed(1, Piece::Red); // Second level of column 1
 
-        board.with_place(2, Piece::Yellow); // Bottom of column 2
-        board.with_place(2, Piece::Yellow); // Second level of column 2
-        board.with_place(2, Piece::Red); // Third level of column 2
+        board.with_placed(2, Piece::Yellow); // Bottom of column 2
+        board.with_placed(2, Piece::Yellow); // Second level of column 2
+        board.with_placed(2, Piece::Red); // Third level of column 2
 
         // Now we have a diagonal RRR_ pattern, missing the top-right piece
         // Should have 1 winning opportunity
@@ -764,19 +826,19 @@ mod tests {
         // We need to build up the columns to the right heights
 
         // Column 0: need red at row 2 (third from top)
-        board.with_place(0, Piece::Yellow); // Row 5 (bottom)
-        board.with_place(0, Piece::Yellow); // Row 4
-        board.with_place(0, Piece::Yellow); // Row 3
-        board.with_place(0, Piece::Red); // Row 2
+        board.with_placed(0, Piece::Yellow); // Row 5 (bottom)
+        board.with_placed(0, Piece::Yellow); // Row 4
+        board.with_placed(0, Piece::Yellow); // Row 3
+        board.with_placed(0, Piece::Red); // Row 2
 
         // Column 1: need red at row 3
-        board.with_place(1, Piece::Yellow); // Row 5
-        board.with_place(1, Piece::Yellow); // Row 4
-        board.with_place(1, Piece::Red); // Row 3
+        board.with_placed(1, Piece::Yellow); // Row 5
+        board.with_placed(1, Piece::Yellow); // Row 4
+        board.with_placed(1, Piece::Red); // Row 3
 
         // Column 2: need red at row 4
-        board.with_place(2, Piece::Yellow); // Row 5
-        board.with_place(2, Piece::Red); // Row 4
+        board.with_placed(2, Piece::Yellow); // Row 5
+        board.with_placed(2, Piece::Red); // Row 4
 
         // Column 3: needs to be empty at row 5 for the opportunity
         // Don't place anything in column 3
@@ -789,10 +851,10 @@ mod tests {
     fn test_count_winning_opportunities_blocked_by_opponent() {
         let mut board = Board::new();
         // Place RRR but then block with opponent piece
-        board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Red);
-        board.with_place(3, Piece::Yellow); // Block the winning opportunity
+        board.with_placed(0, Piece::Red);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(2, Piece::Red);
+        board.with_placed(3, Piece::Yellow); // Block the winning opportunity
 
         // Should have 0 winning opportunities because opponent piece blocks
         assert_eq!(board.count_winning_opportunities(Piece::Red), 0);
@@ -804,14 +866,14 @@ mod tests {
         let mut board = Board::new();
         // Create a simple case with clear multiple opportunities
         // Bottom row: RRR_
-        board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(2, Piece::Red);
 
         // Create a separate vertical opportunity in column 6
-        board.with_place(6, Piece::Red);
-        board.with_place(6, Piece::Red);
-        board.with_place(6, Piece::Red);
+        board.with_placed(6, Piece::Red);
+        board.with_placed(6, Piece::Red);
+        board.with_placed(6, Piece::Red);
 
         // Should have at least 2 opportunities: horizontal and vertical
         assert_eq!(board.count_winning_opportunities(Piece::Red), 2);
@@ -821,9 +883,9 @@ mod tests {
     fn test_count_winning_opportunities_r_gap_rr_pattern() {
         let mut board = Board::new();
         // Create R_RR pattern
-        board.with_place(0, Piece::Red);
-        board.with_place(2, Piece::Red);
-        board.with_place(3, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(2, Piece::Red);
+        board.with_placed(3, Piece::Red);
 
         // Should have 1 winning opportunity (can complete at column 1)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
@@ -832,36 +894,60 @@ mod tests {
     #[test]
     fn fill_column_with_pieces() {
         let mut board = Board::new();
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Yellow);
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Yellow);
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Yellow);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
     }
 
     #[test]
     #[should_panic(expected = "Column is full")]
     fn fill_column_with_pieces_correct_bounds_check() {
         let mut board = Board::new();
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Yellow);
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Yellow);
-        board.with_place(0, Piece::Red);
-        board.with_place(0, Piece::Yellow);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(0, Piece::Yellow);
         // Should crash on the next line
-        board.with_place(0, Piece::Red);
+        board.with_placed(0, Piece::Red);
     }
 
     #[test]
     fn horizontal_win() {
         let mut board = Board::new();
-        board.with_place(0, Piece::Red);
-        board.with_place(1, Piece::Red);
-        board.with_place(2, Piece::Red);
-        board.with_place(3, Piece::Red);
+        board.with_placed(0, Piece::Red);
+        board.with_placed(1, Piece::Red);
+        board.with_placed(2, Piece::Red);
+        board.with_placed(3, Piece::Red);
         assert!(board.is_terminal());
         assert!(board.has_winner() == Some(Piece::Red));
+    }
+
+    #[test]
+    fn prior_states() {
+        let mut board = Board::new();
+        assert!(board.prior_states().is_empty());
+
+        board.with_placed(0, Piece::Red);
+        assert_eq!(board.prior_states().len(), 1);
+
+        board.with_placed(0, Piece::Yellow);
+        assert_eq!(board.prior_states().len(), 1);
+
+        board.with_placed(1, Piece::Red);
+        assert_eq!(board.prior_states().len(), 1);
+
+        board.with_placed(0, Piece::Yellow);
+        assert_eq!(board.prior_states().len(), 1);
+
+        board.with_placed(2, Piece::Red);
+        assert_eq!(board.prior_states().len(), 2);
+
+        board.with_placed(2, Piece::Yellow);
+        assert_eq!(board.prior_states().len(), 2);
     }
 }

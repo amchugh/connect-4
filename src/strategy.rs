@@ -108,14 +108,12 @@ impl StrategyDecider for TriesToWin {
     fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
         for col in options {
             // If we could win, add it.
-            let mut test_board = *board;
-            test_board.with_place(*col, self.piece);
+            let test_board = board.place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
                 return Some(*col);
             }
             // If we would lose, add it to block
-            let mut test_board = *board;
-            test_board.with_place(*col, self.piece.opponent());
+            let test_board = board.place(*col, self.piece.opponent());
             if test_board.has_winner() == Some(self.piece.opponent()) {
                 return Some(*col);
             }
@@ -141,8 +139,7 @@ impl Setup {
 impl StrategyDecider for Setup {
     fn choose(&self, board: &Board, options: &[usize]) -> Option<usize> {
         for col in options {
-            let mut test_board = *board;
-            test_board.with_place(*col, self.piece);
+            let test_board = board.place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
                 return Some(*col);
             }
@@ -174,8 +171,7 @@ impl StrategyLayer for ThreeInARow {
         let mut best_moves = vec![];
 
         for col in options {
-            let mut test_board = *board;
-            test_board.with_place(*col, self.piece);
+            let test_board = board.place(*col, self.piece);
             if test_board.has_winner() == Some(self.piece) {
                 return vec![*col];
             }
@@ -215,8 +211,7 @@ impl StrategyLayer for AvoidTraps {
         let mut allowed = Vec::with_capacity(options.len());
 
         for col in options {
-            let mut test_board = *board;
-            test_board.with_place(*col, self.piece);
+            let test_board = board.place(*col, self.piece);
             // If this move wins, short-circuit
             if test_board.has_winner() == Some(self.piece) {
                 allowed.push(*col);
@@ -254,21 +249,19 @@ impl StrategyLayer for AvoidInescapableTraps {
         let mut allowed = Vec::with_capacity(options.len());
 
         'candidate_loop: for col in options {
-            let mut test_board = *board;
-            test_board.with_place(*col, self.piece);
+            let test_board = board.place(*col, self.piece);
             // If this move wins, short-circuit
             if test_board.has_winner() == Some(self.piece) {
                 allowed.push(*col);
                 continue;
             }
             for next_col in test_board.valid_moves() {
-                let mut next_board = test_board;
-                next_board.with_place(next_col, self.piece.opponent());
+                let next_board = test_board.place(next_col, self.piece.opponent());
                 // If we've lost or have a losing position, don't take it.
-                if test_board.has_winner() == Some(self.piece.opponent()) {
+                if next_board.has_winner() == Some(self.piece.opponent()) {
                     continue 'candidate_loop;
                 }
-                if test_board.winning_moves(self.piece.opponent()).len() > 1 {
+                if next_board.winning_moves(self.piece.opponent()).len() > 1 {
                     continue 'candidate_loop;
                 }
             }

@@ -11,5 +11,8 @@ original-board-benchmark:
 	git switch -
 	git stash pop || echo "Stash pop failed. This is expected if there were no changes to stash"
 
+benchmark-compare:
+	cargo bench --bench board_bench -- --baseline original-board
+
 .PHONY: FORCE
 .FORCE:
