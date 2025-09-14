@@ -275,7 +275,7 @@ impl Board {
         debug_assert!(column < COLUMNS, "Column must be on the board");
 
         let height = self.column_height(column);
-        debug_assert!(height < ROWS - 1, "Column is full");
+        debug_assert!(height < ROWS, "Column is full");
 
         // Need to increment the column height
         self.set_column_height(column, height + 1);
@@ -464,12 +464,8 @@ impl Board {
         ];
         debug_assert!(column_heights.len() == COLUMNS);
 
-        let tallest = column_heights
-            .iter()
-            .fold(COLUMNS - 3, |acc, &height| acc.min(height));
-
         for row in 0..ROWS {
-            for column in 0..tallest {
+            for column in 0..COLUMNS - 3 {
                 if column_heights[column] <= row
                     || column_heights[column + 1] <= row
                     || column_heights[column + 2] <= row
@@ -831,5 +827,41 @@ mod tests {
 
         // Should have 1 winning opportunity (can complete at column 1)
         assert_eq!(board.count_winning_opportunities(Piece::Red), 1);
+    }
+
+    #[test]
+    fn fill_column_with_pieces() {
+        let mut board = Board::new();
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Blue);
+    }
+
+    #[test]
+    #[should_panic(expected = "Column is full")]
+    fn fill_column_with_pieces_correct_bounds_check() {
+        let mut board = Board::new();
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        board.with_place(0, Piece::Red);
+        board.with_place(0, Piece::Blue);
+        // Should crash on the next line
+        board.with_place(0, Piece::Red);
+    }
+
+    #[test]
+    fn horizontal_win() {
+        let mut board = Board::new();
+        board.with_place(0, Piece::Red);
+        board.with_place(1, Piece::Red);
+        board.with_place(2, Piece::Red);
+        board.with_place(3, Piece::Red);
+        assert!(board.is_terminal());
+        assert!(board.has_winner() == Some(Piece::Red));
     }
 }
